@@ -1,0 +1,9 @@
+[package]
+name = "elemeld"
+version = "0.1.0"
+authors = ["MetaDark <kurt.bruneau@gmail.com>"]
+
+[dependencies]
+mio = "*"
+x11-dl = "*"
+dylib = "*"
