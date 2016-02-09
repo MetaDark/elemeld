@@ -95,13 +95,17 @@ impl Server {
     }
 
     fn update_cursor(&mut self, x: i32, y: i32) {
-        let addr = SocketAddr::V4(SocketAddrV4::new(self.config.0, self.config.2));
+        // Ignore if cursor is already positioned at (x,y)
+        if x == self.real_x && y == self.real_y {
+            return;
+        }
 
         self.x += x - self.real_x;
         self.y += y - self.real_y;
         self.real_x = x;
         self.real_y = y;
 
+        let addr = SocketAddr::V4(SocketAddrV4::new(self.config.0, self.config.2));
         let message = format!("cursor: {},{}", self.x, self.y);
         self.udp_socket.send_to(message.as_bytes(), &addr).unwrap();
 
