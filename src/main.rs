@@ -33,9 +33,10 @@ struct Server {
     udp_socket: UdpSocket,
 
     // State
+    focused: bool,
     x: i32, y: i32,
     real_x: i32, real_y: i32,
-    focused: bool,
+    width: i32, height: i32,
 }
 
 impl Server {
@@ -78,6 +79,10 @@ impl Server {
 
         // Query dimensions for local screen
         let (_, _, x, y, _, _, _) = display.query_pointer();
+        let (width, height) = {
+            let screen = display.default_screen_of_display();
+            (screen.width, screen.height)
+        };
 
         Server {
             config: config,
@@ -86,9 +91,10 @@ impl Server {
             x11_socket: x11_socket,
             udp_socket: udp_socket,
 
+            focused: true,
             x: x, y: y,
             real_x: x, real_y: y,
-            focused: true,
+            width: width, height: height,
         }
     }
 
@@ -109,8 +115,7 @@ impl Server {
     }
 
     fn cursor_in_screen(&self) -> bool {
-        let screen = self.display.default_screen_of_display();
-        self.x > 0 && self.y > 0 && self.x < screen.width - 1 && self.y < screen.height - 1
+        self.x > 0 && self.y > 0 && self.x < self.width - 1 && self.y < self.height - 1
     }
 
     fn unfocus(&mut self) {
@@ -137,9 +142,8 @@ impl Server {
 
     fn center_cursor(&mut self) {
         let root = self.display.default_root_window();
-        let screen = self.display.default_screen_of_display();
-        self.real_x = screen.width / 2;
-        self.real_y = screen.height / 2;
+        self.real_x = self.width / 2;
+        self.real_y = self.height / 2;
         self.display.warp_pointer(0, root, 0, 0, 0, 0, self.real_x, self.real_y);
         self.display.next_event();
     }
