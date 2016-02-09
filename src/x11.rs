@@ -146,10 +146,6 @@ impl Display {
         unsafe { (self.xlib.XConnectionNumber)(self.display) }
     }
 
-    pub fn flush(&self) {
-        unsafe { (self.xlib.XFlush)(self.display) };
-    }
-
     pub fn grab_pointer(&self, event_mask: i64) {
         unsafe { (self.xlib.XGrabPointer)(
             self.display, self.root, xlib::True, event_mask as u32,

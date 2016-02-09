@@ -61,8 +61,6 @@ impl Server {
                             EventSet::readable(),
                             PollOpt::level()).unwrap();
 
-        display.flush(); // TODO: Not sure why this is necessary
-
         // Setup UDP socket
         let udp_socket = UdpSocket::v4().unwrap();
         udp_socket.join_multicast(&IpAddr::V4(config.0)).unwrap();
