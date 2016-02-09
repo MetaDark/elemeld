@@ -1,17 +1,44 @@
 use std::{ptr, mem};
 
-use xfixes;
-
 use x11_dl::xlib;
 pub use x11_dl::xlib::{
-    // Structs
-    Cursor,
-    Screen,
-    Time,
-    Window,
-    XColor,
+    // Events
+    XKeyPressedEvent,
+    XKeyReleasedEvent,
+    XButtonPressedEvent,
+    XButtonReleasedEvent,
+    XMotionEvent,
+    XEnterWindowEvent,
+    XLeaveWindowEvent,
+    XFocusInEvent,
+    XFocusOutEvent,
+    XKeymapEvent,
+    XExposeEvent,
+    XGraphicsExposeEvent,
+    XNoExposeEvent,
+    XVisibilityEvent,
+    XCreateWindowEvent,
+    XDestroyWindowEvent,
+    XUnmapEvent,
+    XMapEvent,
+    XMapRequestEvent,
+    XReparentEvent,
+    XConfigureEvent,
+    XConfigureRequestEvent,
+    XGravityEvent,
+    XResizeRequestEvent,
+    XCirculateEvent,
+    XCirculateRequestEvent,
+    XPropertyEvent,
+    XSelectionClearEvent,
+    XSelectionRequestEvent,
+    XSelectionEvent,
+    XColormapEvent,
+    XClientMessageEvent,
+    XMappingEvent,
+    XGenericEventCookie,
 
-    // Masks
+    // Event masks
     NoEventMask,
     KeyPressMask,
     KeyReleaseMask,
@@ -38,10 +65,6 @@ pub use x11_dl::xlib::{
     PropertyChangeMask,
     ColormapChangeMask,
     OwnerGrabButtonMask,
-
-    // Other
-    GrabModeAsync,
-    CurrentTime,
 };
 
 use x11_dl::xinput2;
@@ -51,50 +74,50 @@ pub use x11_dl::xinput2::{
     XIClearMask,
     XIMaskIsSet,
 
-    // Structs
+    // XInput objects
+    XIAllDevices,
+    XIAllMasterDevices,
     XIEventMask,
 
-    // Devices
-    XIAllMasterDevices,
-
     // Events
+    XI_DeviceChanged,
+    XI_KeyPress,
+    XI_KeyRelease,
+    XI_ButtonPress,
+    XI_ButtonRelease,
+    XI_Motion,
+    XI_Enter,
+    XI_Leave,
+    XI_FocusIn,
+    XI_FocusOut,
+    XI_HierarchyChanged,
+    XI_PropertyEvent,
+    XI_RawKeyPress,
+    XI_RawKeyRelease,
+    XI_RawButtonPress,
+    XI_RawButtonRelease,
     XI_RawMotion,
+    XI_TouchBegin,
+    XI_TouchUpdate,
+    XI_TouchEnd,
+    XI_TouchOwnership,
+    XI_RawTouchBegin,
+    XI_RawTouchUpdate,
+    XI_RawTouchEnd,
+    XI_BarrierHit,
+    XI_BarrierLeave,
     XI_LASTEVENT,
-
-    // Masks
-    XI_DeviceChangedMask,
-    XI_KeyPressMask,
-    XI_KeyReleaseMask,
-    XI_ButtonPressMask,
-    XI_ButtonReleaseMask,
-    XI_MotionMask,
-    XI_EnterMask,
-    XI_LeaveMask,
-    XI_FocusInMask,
-    XI_FocusOutMask,
-    XI_HierarchyChangedMask,
-    XI_PropertyEventMask,
-    XI_RawKeyPressMask,
-    XI_RawKeyReleaseMask,
-    XI_RawButtonPressMask,
-    XI_RawButtonReleaseMask,
-    XI_RawMotionMask,
-    XI_TouchBeginMask,
-    XI_TouchEndMask,
-    XI_TouchOwnershipChangedMask,
-    XI_TouchUpdateMask,
-    XI_RawTouchBeginMask,
-    XI_RawTouchEndMask,
-    XI_RawTouchUpdateMask,
-    XI_BarrierHitMask,
-    XI_BarrierLeaveMask,
 };
+
+use xfixes;
+pub use x11_dl::keysym::*;
 
 pub struct Display {
     xlib: xlib::Xlib,
     xinput2: xinput2::XInput2,
     xfixes: xfixes::XFixes,
     display: *mut xlib::Display,
+    root: xlib::Window,
 }
 
 impl Display {
@@ -108,11 +131,13 @@ impl Display {
             panic!("Failed to open display");
         }
 
+        let root = unsafe { (xlib.XDefaultRootWindow)(display) };
         Display {
             xlib: xlib,
             xinput2: xinput2,
             xfixes: xfixes,
-            display: display
+            display: display,
+            root: root,
         }
     }
 
@@ -121,33 +146,45 @@ impl Display {
         unsafe { (self.xlib.XConnectionNumber)(self.display) }
     }
 
-    pub fn default_root_window(&self) -> u64 {
-        unsafe { (self.xlib.XDefaultRootWindow)(self.display) }
-    }
-
-    pub fn default_screen_of_display(&self) -> &Screen {
-        unsafe { &*(self.xlib.XDefaultScreenOfDisplay)(self.display) }
-    }
-
     pub fn flush(&self) {
         unsafe { (self.xlib.XFlush)(self.display) };
     }
 
-    pub fn grab_pointer(&self, grab_window: Window, owner_events: bool,
-                        event_mask: i64, pointer_mode: i32, keyboard_mode: i32,
-                        confine_to: Window, cursor: Cursor, time: Time)
-    {
+    pub fn grab_pointer(&self, event_mask: i64) {
         unsafe { (self.xlib.XGrabPointer)(
-            self.display, grab_window, owner_events as i32, event_mask as u32,
-            pointer_mode, keyboard_mode, confine_to, cursor, time
+            self.display, self.root, xlib::True, event_mask as u32,
+            xlib::GrabModeAsync, xlib::GrabModeAsync, 0, 0, xlib::CurrentTime
         ) };
     }
 
-    pub fn next_event(&self) -> Event {
-        let mut event: xlib::XEvent = unsafe { mem::uninitialized() };
-        unsafe { (self.xlib.XNextEvent)(self.display, &mut event) };
+    pub fn grab_keyboard(&self) {
+        unsafe { (self.xlib.XGrabKeyboard)(
+            self.display, self.root, xlib::True,
+            xlib::GrabModeAsync, xlib::GrabModeAsync, xlib::CurrentTime
+        ) };
+    }
 
-        match event.get_type() {
+    pub fn grab_key(&self, keycode: i32, modifiers: u32) {
+        unsafe { (self.xlib.XGrabKey)(
+            self.display, keycode, modifiers, self.root, xlib::True,
+            xlib::GrabModeAsync, xlib::GrabModeAsync)
+        };
+    }
+
+    pub fn next_event(&self) -> Option<Event> {
+        // TODO: Would XEventsQueued with QueuedAlready make more sense?
+        let num_events = unsafe { (self.xlib.XPending)(self.display) };
+        if num_events <= 0 {
+            return None;
+        }
+
+        let event = unsafe {
+            let mut event = mem::uninitialized();
+            (self.xlib.XNextEvent)(self.display, &mut event);
+            event
+        };
+
+        Some(match event.get_type() {
             xlib::KeyPress => Event::KeyPress(From::from(event)),
             xlib::KeyRelease => Event::KeyRelease(From::from(event)),
             xlib::ButtonPress => Event::ButtonPress(From::from(event)),
@@ -183,62 +220,64 @@ impl Display {
             xlib::MappingNotify => Event::MappingNotify(From::from(event)),
             xlib::GenericEvent => Event::GenericEvent(From::from(event)),
             _ => unreachable!(),
-        }
+        })
     }
 
-    pub fn pending(&self) -> i32 {
-        unsafe { (self.xlib.XPending)(self.display) }
-    }
-
-    pub fn query_pointer(&self) -> (Window, Window, i32, i32, i32, i32, u32) {
+    pub fn query_pointer(&self) -> (i32, i32) {
         unsafe {
-            let root = self.default_root_window();
-            let mut root_return: Window = mem::uninitialized();
-            let mut child_return: Window = mem::uninitialized();
-            let mut root_x: i32 = mem::uninitialized();
-            let mut root_y: i32 = mem::uninitialized();
-            let mut child_x: i32 = mem::uninitialized();
-            let mut child_y: i32 = mem::uninitialized();
-            let mut mask: u32 = mem::uninitialized();
+            let mut root = mem::uninitialized();
+            let mut child = mem::uninitialized();
+            let mut root_x = mem::uninitialized();
+            let mut root_y = mem::uninitialized();
+            let mut child_x = mem::uninitialized();
+            let mut child_y = mem::uninitialized();
+            let mut mask = mem::uninitialized();
 
-            (self.xlib.XQueryPointer)(self.display, root,
-                &mut root_return, &mut child_return, &mut root_x, &mut root_y,
+            (self.xlib.XQueryPointer)(self.display, self.root,
+                &mut root, &mut child, &mut root_x, &mut root_y,
                 &mut child_x, &mut child_y, &mut mask
             );
 
-            (root_return, child_return, root_x, root_y, child_x, child_y, mask)
+            (root_x, root_y)
         }
     }
 
-    pub fn select_input(&self, w: Window, event_mask: i64) {
-        unsafe { (self.xlib.XSelectInput)(self.display, w, event_mask) };
+    pub fn query_screen(&self) -> (i32, i32) {
+        let screen = unsafe {
+            &*(self.xlib.XDefaultScreenOfDisplay)(self.display)
+        };
+        (screen.width, screen.height)
     }
 
-    pub fn ungrab_pointer(&self, time: Time) {
-        unsafe { (self.xlib.XUngrabPointer)(self.display, time) };
+    pub fn select_input(&self, event_mask: i64) {
+        unsafe { (self.xlib.XSelectInput)(self.display, self.root, event_mask) };
     }
 
-    pub fn warp_pointer(&self, src_w: Window, dest_w: Window,
-                        src_x: i32, src_y: i32, src_width: u32, src_height: u32,
-                        dest_x: i32, dest_y: i32) {
+    pub fn ungrab_pointer(&self) {
+        unsafe { (self.xlib.XUngrabPointer)(self.display, xlib::CurrentTime) };
+    }
+
+    pub fn warp_pointer(&self, x: i32, y: i32) {
         unsafe { (self.xlib.XWarpPointer)(
-            self.display, src_w, dest_w, src_x, src_y,
-            src_width, src_height, dest_x, dest_y
+            self.display, 0, self.root, 0, 0, 0, 0, x, y
         ) };
     }
 
     // xinput2 interface
-    pub fn xi_select_events(&self, win: Window, mask: &mut [XIEventMask]) {
-        unsafe { (self.xinput2.XISelectEvents)(self.display, win, &mut mask[0] as *mut XIEventMask, mask.len() as i32) };
+    pub fn xi_select_events(&self, mask: &mut [XIEventMask]) {
+        unsafe { (self.xinput2.XISelectEvents)(
+            self.display, self.root,
+            &mut mask[0] as *mut XIEventMask, mask.len() as i32
+        ) };
     }
 
     // xfixes
-    pub fn show_cursor(&self, w: Window) {
-        unsafe { (self.xfixes.XFixesShowCursor)(self.display, w) };
+    pub fn show_cursor(&self) {
+        unsafe { (self.xfixes.XFixesShowCursor)(self.display, self.root) };
     }
 
-    pub fn hide_cursor(&self, w: Window) {
-        unsafe { (self.xfixes.XFixesHideCursor)(self.display, w) };
+    pub fn hide_cursor(&self) {
+        unsafe { (self.xfixes.XFixesHideCursor)(self.display, self.root) };
     }
 }
 
@@ -249,38 +288,38 @@ impl Drop for Display {
 }
 
 pub enum Event {
-    KeyPress(xlib::XKeyPressedEvent),
-    KeyRelease(xlib::XKeyReleasedEvent),
-    ButtonPress(xlib::XButtonPressedEvent),
-    ButtonRelease(xlib::XButtonReleasedEvent),
-    MotionNotify(xlib::XMotionEvent),
-    EnterNotify(xlib::XEnterWindowEvent),
-    LeaveNotify(xlib::XLeaveWindowEvent),
-    FocusIn(xlib::XFocusInEvent),
-    FocusOut(xlib::XFocusOutEvent),
-    KeymapNotify(xlib::XKeymapEvent),
-    Expose(xlib::XExposeEvent),
-    GraphicsExpose(xlib::XGraphicsExposeEvent),
-    NoExpose(xlib::XNoExposeEvent),
-    VisibilityNotify(xlib::XVisibilityEvent),
-    CreateNotify(xlib::XCreateWindowEvent),
-    DestroyNotify(xlib::XDestroyWindowEvent),
-    UnmapNotify(xlib::XUnmapEvent),
-    MapNotify(xlib::XMapEvent),
-    MapRequest(xlib::XMapRequestEvent),
-    ReparentNotify(xlib::XReparentEvent),
-    ConfigureNotify(xlib::XConfigureEvent),
-    ConfigureRequest(xlib::XConfigureRequestEvent),
-    GravityNotify(xlib::XGravityEvent),
-    ResizeRequest(xlib::XResizeRequestEvent),
-    CirculateNotify(xlib::XCirculateEvent),
-    CirculateRequest(xlib::XCirculateRequestEvent),
-    PropertyNotify(xlib::XPropertyEvent),
-    SelectionClear(xlib::XSelectionClearEvent),
-    SelectionRequest(xlib::XSelectionRequestEvent),
-    SelectionNotify(xlib::XSelectionEvent),
-    ColormapNotify(xlib::XColormapEvent),
-    ClientMessage(xlib::XClientMessageEvent),
-    MappingNotify(xlib::XMappingEvent),
-    GenericEvent(xlib::XGenericEventCookie),
+    KeyPress(XKeyPressedEvent),
+    KeyRelease(XKeyReleasedEvent),
+    ButtonPress(XButtonPressedEvent),
+    ButtonRelease(XButtonReleasedEvent),
+    MotionNotify(XMotionEvent),
+    EnterNotify(XEnterWindowEvent),
+    LeaveNotify(XLeaveWindowEvent),
+    FocusIn(XFocusInEvent),
+    FocusOut(XFocusOutEvent),
+    KeymapNotify(XKeymapEvent),
+    Expose(XExposeEvent),
+    GraphicsExpose(XGraphicsExposeEvent),
+    NoExpose(XNoExposeEvent),
+    VisibilityNotify(XVisibilityEvent),
+    CreateNotify(XCreateWindowEvent),
+    DestroyNotify(XDestroyWindowEvent),
+    UnmapNotify(XUnmapEvent),
+    MapNotify(XMapEvent),
+    MapRequest(XMapRequestEvent),
+    ReparentNotify(XReparentEvent),
+    ConfigureNotify(XConfigureEvent),
+    ConfigureRequest(XConfigureRequestEvent),
+    GravityNotify(XGravityEvent),
+    ResizeRequest(XResizeRequestEvent),
+    CirculateNotify(XCirculateEvent),
+    CirculateRequest(XCirculateRequestEvent),
+    PropertyNotify(XPropertyEvent),
+    SelectionClear(XSelectionClearEvent),
+    SelectionRequest(XSelectionRequestEvent),
+    SelectionNotify(XSelectionEvent),
+    ColormapNotify(XColormapEvent),
+    ClientMessage(XClientMessageEvent),
+    MappingNotify(XMappingEvent),
+    GenericEvent(XGenericEventCookie),
 }

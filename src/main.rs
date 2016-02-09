@@ -44,7 +44,6 @@ impl Server {
         // Setup X11 display
         let display = Display::open();
 
-        let root = display.default_root_window();
         let mut mask = [0u8; (XI_LASTEVENT as usize + 7) / 8];
         XISetMask(&mut mask, XI_RawMotion);
 
@@ -54,7 +53,7 @@ impl Server {
             mask: &mut mask[0] as *mut u8,
         }];
 
-        display.xi_select_events(root, &mut events);
+        display.xi_select_events(&mut events);
 
         let x11_socket = Io::from_raw_fd(display.connection_number());
         event_loop.register(&x11_socket,
@@ -78,11 +77,8 @@ impl Server {
                             PollOpt::edge()).unwrap();
 
         // Query dimensions for local screen
-        let (_, _, x, y, _, _, _) = display.query_pointer();
-        let (width, height) = {
-            let screen = display.default_screen_of_display();
-            (screen.width, screen.height)
-        };
+        let (x, y) = display.query_pointer();
+        let (width, height) = display.query_screen();
 
         Server {
             config: config,
@@ -100,12 +96,14 @@ impl Server {
 
     fn update_cursor(&mut self, x: i32, y: i32) {
         let addr = SocketAddr::V4(SocketAddrV4::new(self.config.0, self.config.2));
-        self.udp_socket.send_to(b"cursor move\n", &addr).unwrap();
 
         self.x += x - self.real_x;
         self.y += y - self.real_y;
         self.real_x = x;
         self.real_y = y;
+
+        let message = format!("cursor: {},{}", self.x, self.y);
+        self.udp_socket.send_to(message.as_bytes(), &addr).unwrap();
 
         if self.cursor_in_screen() {
             self.focus();
@@ -120,11 +118,8 @@ impl Server {
 
     fn unfocus(&mut self) {
         if self.focused {
-            let root = self.display.default_root_window();
-            self.display.hide_cursor(root);
-            self.display.grab_pointer(root, true,
-                                      PointerMotionMask | ButtonPressMask | ButtonReleaseMask,
-                                      GrabModeAsync, GrabModeAsync, 0, 0, CurrentTime);
+            self.display.hide_cursor();
+            self.display.grab_pointer(PointerMotionMask | ButtonPressMask | ButtonReleaseMask);
             self.focused = false;
         }
 
@@ -134,25 +129,23 @@ impl Server {
     fn focus(&mut self) {
         if !self.focused {
             self.restore_cursor();
-            self.display.ungrab_pointer(CurrentTime);
-            self.display.show_cursor(self.display.default_root_window());
+            self.display.ungrab_pointer();
+            self.display.show_cursor();
             self.focused = true;
         }
     }
 
     fn center_cursor(&mut self) {
-        let root = self.display.default_root_window();
         self.real_x = self.width / 2;
         self.real_y = self.height / 2;
-        self.display.warp_pointer(0, root, 0, 0, 0, 0, self.real_x, self.real_y);
+        self.display.warp_pointer(self.real_x, self.real_y);
         self.display.next_event();
     }
 
     fn restore_cursor(&mut self) {
-        let root = self.display.default_root_window();
         self.real_x = self.x;
         self.real_y = self.y;
-        self.display.warp_pointer(0, root, 0, 0, 0, 0, self.real_x, self.real_y);
+        self.display.warp_pointer(self.real_x, self.real_y);
         self.display.next_event();
     }
 }
@@ -165,35 +158,33 @@ impl Handler for Server {
     fn ready(&mut self, event_loop: &mut EventLoop<Self>, token: Token, events: EventSet) {
         match token {
             X11_TOKEN => {
-                // TODO: Would XEventsQueued with QueuedAlready make more sense?
-                assert!(self.display.pending() != 0);
-
                 match self.display.next_event() {
-                    Event::MotionNotify(e) => {
+                    Some(Event::MotionNotify(e)) => {
                         self.update_cursor(e.x_root, e.y_root);
                     },
-                    Event::KeyPress(e) => {
+                    Some(Event::KeyPress(e)) => {
                     },
-                    Event::ButtonPress(e) => {
+                    Some(Event::ButtonPress(e)) => {
                         let addr = SocketAddr::V4(SocketAddrV4::new(self.config.0, self.config.2));
-                        self.udp_socket.send_to(b"button press\n", &addr).unwrap();
+                        self.udp_socket.send_to(b"button press", &addr).unwrap();
                     },
-                    Event::ButtonRelease(e) => {
+                    Some(Event::ButtonRelease(e)) => {
                         let addr = SocketAddr::V4(SocketAddrV4::new(self.config.0, self.config.2));
-                        self.udp_socket.send_to(b"button release\n", &addr).unwrap();
+                        self.udp_socket.send_to(b"button release", &addr).unwrap();
                     },
-                    Event::GenericEvent(e) => {
-                        let (_, _, x, y, _, _, _) = self.display.query_pointer();
+                    Some(Event::GenericEvent(e)) => {
+                        let (x, y) = self.display.query_pointer();
                         self.update_cursor(x, y);
                     },
-                    _ => unreachable!(),
+                    Some(_) => unreachable!(),
+                    None => (),
                 }
             },
             NET_TOKEN => {
                 let mut buf = [0u8; 255];
                 match self.udp_socket.recv_from(&mut buf).unwrap() {
                     Some((len, addr)) => {
-                        print!("{}: {}", addr, str::from_utf8(&buf[..len]).unwrap());
+                        println!("{}: {}", addr, str::from_utf8(&buf[..len]).unwrap());
                     },
                     None => (),
                 }
