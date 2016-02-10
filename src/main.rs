@@ -54,6 +54,7 @@ impl Server {
         }];
 
         display.xi_select_events(&mut events);
+        display.grab_key(display.keysym_to_keycode(XK_Escape as KeySym), 0);
 
         let x11_socket = Io::from_raw_fd(display.connection_number());
         event_loop.register(&x11_socket,
@@ -120,8 +121,9 @@ impl Server {
 
     fn unfocus(&mut self) {
         if self.focused {
-            self.display.hide_cursor();
             self.display.grab_pointer(PointerMotionMask | ButtonPressMask | ButtonReleaseMask);
+            self.display.grab_keyboard();
+            self.display.hide_cursor();
             self.focused = false;
         }
 
@@ -130,8 +132,9 @@ impl Server {
 
     fn focus(&mut self) {
         if !self.focused {
-            self.restore_cursor();
             self.display.ungrab_pointer();
+            self.display.ungrab_keyboard();
+            self.restore_cursor();
             self.display.show_cursor();
             self.focused = true;
         }
@@ -165,7 +168,14 @@ impl Handler for Server {
                         self.update_cursor(e.x_root, e.y_root);
                     },
                     Some(Event::KeyPress(e)) => {
+                        let keysym = self.display.keycode_to_keysym(e.keycode as u8, 0);
+                        println!("{}", self.display.keysym_to_string(keysym));
                     },
+                    Some(Event::KeyRelease(e)) => {
+                        let keysym = self.display.keycode_to_keysym(e.keycode as u8, 0);
+                        println!("{}", self.display.keysym_to_string(keysym));
+                    },
+                    Some(Event::MappingNotify(e)) => (),
                     Some(Event::ButtonPress(e)) => {
                         let addr = SocketAddr::V4(SocketAddrV4::new(self.config.0, self.config.2));
                         self.udp_socket.send_to(b"button press", &addr).unwrap();

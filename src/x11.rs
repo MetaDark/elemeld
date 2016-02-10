@@ -1,4 +1,5 @@
 use std::{ptr, mem};
+use std::ffi::CStr;
 
 use x11_dl::xlib;
 pub use x11_dl::xlib::{
@@ -65,6 +66,27 @@ pub use x11_dl::xlib::{
     PropertyChangeMask,
     ColormapChangeMask,
     OwnerGrabButtonMask,
+
+    // Key types
+    KeyCode,
+    KeySym,
+
+    // Keyboard modifiers
+    ShiftMask,
+    LockMask,
+    ControlMask,
+    Mod1Mask,
+    Mod2Mask,
+    Mod3Mask,
+    Mod4Mask,
+    Mod5Mask,
+
+    // Mouse buttons
+    Button1,
+    Button2,
+    Button3,
+    Button4,
+    Button5,
 };
 
 use x11_dl::xinput2;
@@ -160,11 +182,28 @@ impl Display {
         ) };
     }
 
-    pub fn grab_key(&self, keycode: i32, modifiers: u32) {
-        unsafe { (self.xlib.XGrabKey)(
-            self.display, keycode, modifiers, self.root, xlib::True,
-            xlib::GrabModeAsync, xlib::GrabModeAsync)
+    pub fn grab_key(&self, keycode: xlib::KeyCode, modifiers: u32) {
+        unsafe {
+            (self.xlib.XGrabKey)(
+                self.display, keycode as i32, modifiers, self.root, xlib::True,
+                xlib::GrabModeAsync, xlib::GrabModeAsync
+            )
         };
+    }
+
+    pub fn keycode_to_keysym(&self, keycode: KeyCode,
+                             index: i32) -> KeySym {
+        unsafe { (self.xlib.XKeycodeToKeysym)(self.display, keycode, index) }
+    }
+
+    pub fn keysym_to_keycode(&self, keysym: KeySym) -> KeyCode {
+        unsafe { (self.xlib.XKeysymToKeycode)(self.display, keysym) }
+    }
+
+    pub fn keysym_to_string(&self, keysym: KeySym) -> &str {
+        unsafe { CStr::from_ptr(
+            (self.xlib.XKeysymToString)(keysym)
+        ).to_str().unwrap() }
     }
 
     pub fn next_event(&self) -> Option<Event> {
@@ -253,13 +292,23 @@ impl Display {
         unsafe { (self.xlib.XUngrabPointer)(self.display, xlib::CurrentTime) };
     }
 
+    pub fn ungrab_keyboard(&self) {
+        unsafe { (self.xlib.XUngrabKeyboard)(self.display, xlib::CurrentTime) };
+    }
+
+    pub fn ungrab_key(&self, keycode: xlib::KeyCode, modifiers: u32) {
+        unsafe { (self.xlib.XUngrabKey)(
+            self.display, keycode as i32, modifiers, self.root
+        ) };
+    }
+
     pub fn warp_pointer(&self, x: i32, y: i32) {
         unsafe { (self.xlib.XWarpPointer)(
             self.display, 0, self.root, 0, 0, 0, 0, x, y
         ) };
     }
 
-    // xinput2 interface
+    // xinput2
     pub fn xi_select_events(&self, mask: &mut [XIEventMask]) {
         unsafe { (self.xinput2.XISelectEvents)(
             self.display, self.root,
