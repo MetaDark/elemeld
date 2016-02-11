@@ -96,6 +96,7 @@ impl Server {
         }
     }
 
+    // display functions
     fn update_cursor(&mut self, x: i32, y: i32) {
         // Ignore if cursor is already positioned at (x,y)
         if x == self.real_x && y == self.real_y {
@@ -106,10 +107,7 @@ impl Server {
         self.y += y - self.real_y;
         self.real_x = x;
         self.real_y = y;
-
-        let addr = SocketAddr::V4(SocketAddrV4::new(self.config.0, self.config.2));
-        let message = format!("cursor: {},{}", self.x, self.y);
-        self.udp_socket.send_to(message.as_bytes(), &addr).unwrap();
+        self.send_to_all(&format!("cursor {} {}", self.x, self.y));
 
         if self.cursor_in_screen() {
             self.focus();
@@ -156,6 +154,25 @@ impl Server {
         self.display.move_cursor(self.real_x, self.real_y);
         self.display.next_event(); // consume mouse event
     }
+
+    // network functions
+    fn send_to(&self, buf: &str, addr: &SocketAddr) -> Option<usize> {
+        self.udp_socket.send_to(buf.as_bytes(), &addr).unwrap()
+    }
+
+    fn send_to_all(&self, buf: &str) -> Option<usize> {
+        let multicast_addr = SocketAddr::V4(SocketAddrV4::new(self.config.0, self.config.2));
+        self.send_to(buf, &multicast_addr)
+    }
+
+    fn recv_from(&self) -> Option<(String, SocketAddr)> {
+        let mut buf = [0; 256];
+        match self.udp_socket.recv_from(&mut buf).unwrap() {
+            Some((len, addr)) =>
+                Some((String::from(str::from_utf8(&buf[..len]).unwrap()), addr)),
+            None => None,
+        }
+    }
 }
 
 impl Handler for Server {
@@ -176,36 +193,31 @@ impl Handler for Server {
                             XK_Escape => { if e.state == AltLMask {
                                 println!("Alt-Escape");
                             } },
-                            _ => println!("{}", self.display.keysym_to_string(keysym)),
+                            keysym => {
+                                self.send_to_all(&format!("key_down {}", keysym));
+                            },
                         }
                     },
                     Some(Event::KeyRelease(e)) => {
                         let keysym = self.display.keycode_to_keysym(e.keycode as u8, 0);
-                        println!("{}", self.display.keysym_to_string(keysym));
+                        self.send_to_all(&format!("key_up {}", keysym));
                     },
                     Some(Event::ButtonPress(e)) => {
-                        let addr = SocketAddr::V4(SocketAddrV4::new(self.config.0, self.config.2));
-                        self.udp_socket.send_to(b"button press", &addr).unwrap();
+                        self.send_to_all(&format!("button_up {}", e.button));
                     },
                     Some(Event::ButtonRelease(e)) => {
-                        let addr = SocketAddr::V4(SocketAddrV4::new(self.config.0, self.config.2));
-                        self.udp_socket.send_to(b"button release", &addr).unwrap();
+                        self.send_to_all(&format!("button_up {}", e.button));
                     },
                     Some(Event::GenericEvent(e)) => { if e.evtype == XI_RawMotion {
                         let (x, y) = self.display.cursor_pos();
                         self.update_cursor(x, y);
                     } },
-                    Some(Event::MappingNotify(e)) => (),
-                    Some(_) => unreachable!(),
-                    None => (),
+                    _ => (),
                 }
             },
             NET_TOKEN => {
-                let mut buf = [0u8; 255];
-                match self.udp_socket.recv_from(&mut buf).unwrap() {
-                    Some((len, addr)) => {
-                        println!("{}: {}", addr, str::from_utf8(&buf[..len]).unwrap());
-                    },
+                match self.recv_from() {
+                    Some((msg, addr)) => println!("{}", msg),
                     None => (),
                 }
             },
