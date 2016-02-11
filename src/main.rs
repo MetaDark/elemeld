@@ -1,14 +1,17 @@
-#![allow(dead_code, unused_variables, unused_imports)]
+#![allow(dead_code, unused_variables, unused_imports, non_upper_case_globals)]
 
 extern crate mio;
 extern crate x11_dl;
 extern crate dylib;
 
+mod event;
+mod x11;
 #[macro_use] mod link;
 mod xfixes;
-mod x11;
 
+use event::Key;
 use x11::*;
+
 use mio::*;
 use mio::udp::UdpSocket;
 use std::net::{SocketAddr, SocketAddrV4};
@@ -54,7 +57,7 @@ impl Server {
         }];
 
         display.xi_select_events(&mut events);
-        display.grab_key(display.keysym_to_keycode(XK_Escape as KeySym), 0);
+        display.grab_key(display.keysym_to_keycode(XK_Escape as KeySym), AltLMask);
 
         let x11_socket = Io::from_raw_fd(display.connection_number());
         event_loop.register(&x11_socket,
@@ -76,8 +79,8 @@ impl Server {
                             PollOpt::edge()).unwrap();
 
         // Query dimensions for local screen
-        let (x, y) = display.query_pointer();
-        let (width, height) = display.query_screen();
+        let (x, y) = display.cursor_pos();
+        let (width, height) = display.screen_size();
 
         Server {
             config: config,
@@ -121,7 +124,7 @@ impl Server {
 
     fn unfocus(&mut self) {
         if self.focused {
-            self.display.grab_pointer(PointerMotionMask | ButtonPressMask | ButtonReleaseMask);
+            self.display.grab_cursor(PointerMotionMask | ButtonPressMask | ButtonReleaseMask);
             self.display.grab_keyboard();
             self.display.hide_cursor();
             self.focused = false;
@@ -132,7 +135,7 @@ impl Server {
 
     fn focus(&mut self) {
         if !self.focused {
-            self.display.ungrab_pointer();
+            self.display.ungrab_cursor();
             self.display.ungrab_keyboard();
             self.restore_cursor();
             self.display.show_cursor();
@@ -143,15 +146,15 @@ impl Server {
     fn center_cursor(&mut self) {
         self.real_x = self.width / 2;
         self.real_y = self.height / 2;
-        self.display.warp_pointer(self.real_x, self.real_y);
-        self.display.next_event();
+        self.display.move_cursor(self.real_x, self.real_y);
+        self.display.next_event(); // consume mouse event
     }
 
     fn restore_cursor(&mut self) {
         self.real_x = self.x;
         self.real_y = self.y;
-        self.display.warp_pointer(self.real_x, self.real_y);
-        self.display.next_event();
+        self.display.move_cursor(self.real_x, self.real_y);
+        self.display.next_event(); // consume mouse event
     }
 }
 
@@ -169,13 +172,17 @@ impl Handler for Server {
                     },
                     Some(Event::KeyPress(e)) => {
                         let keysym = self.display.keycode_to_keysym(e.keycode as u8, 0);
-                        println!("{}", self.display.keysym_to_string(keysym));
+                        match keysym as u32 {
+                            XK_Escape => { if e.state == AltLMask {
+                                println!("Alt-Escape");
+                            } },
+                            _ => println!("{}", self.display.keysym_to_string(keysym)),
+                        }
                     },
                     Some(Event::KeyRelease(e)) => {
                         let keysym = self.display.keycode_to_keysym(e.keycode as u8, 0);
                         println!("{}", self.display.keysym_to_string(keysym));
                     },
-                    Some(Event::MappingNotify(e)) => (),
                     Some(Event::ButtonPress(e)) => {
                         let addr = SocketAddr::V4(SocketAddrV4::new(self.config.0, self.config.2));
                         self.udp_socket.send_to(b"button press", &addr).unwrap();
@@ -184,10 +191,11 @@ impl Handler for Server {
                         let addr = SocketAddr::V4(SocketAddrV4::new(self.config.0, self.config.2));
                         self.udp_socket.send_to(b"button release", &addr).unwrap();
                     },
-                    Some(Event::GenericEvent(e)) => {
-                        let (x, y) = self.display.query_pointer();
+                    Some(Event::GenericEvent(e)) => { if e.evtype == XI_RawMotion {
+                        let (x, y) = self.display.cursor_pos();
                         self.update_cursor(x, y);
-                    },
+                    } },
+                    Some(Event::MappingNotify(e)) => (),
                     Some(_) => unreachable!(),
                     None => (),
                 }

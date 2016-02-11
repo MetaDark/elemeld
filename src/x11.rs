@@ -1,4 +1,6 @@
-use std::{ptr, mem};
+use event::Key;
+
+use std::{ptr, mem, str};
 use std::ffi::CStr;
 
 use x11_dl::xlib;
@@ -72,14 +74,14 @@ pub use x11_dl::xlib::{
     KeySym,
 
     // Keyboard modifiers
-    ShiftMask,
-    LockMask,
-    ControlMask,
-    Mod1Mask,
-    Mod2Mask,
-    Mod3Mask,
-    Mod4Mask,
-    Mod5Mask,
+    ShiftMask,   // Left?
+    LockMask,    // Left?
+    ControlMask, // Left?
+    Mod1Mask as AltLMask,
+    Mod2Mask,    // ?
+    Mod3Mask,    // ?
+    Mod4Mask as SuperLMask,
+    Mod5Mask,    // ?
 
     // Mouse buttons
     Button1,
@@ -131,12 +133,15 @@ pub use x11_dl::xinput2::{
     XI_LASTEVENT,
 };
 
+use x11_dl::xtest;
+
 use xfixes;
 pub use x11_dl::keysym::*;
 
 pub struct Display {
     xlib: xlib::Xlib,
     xinput2: xinput2::XInput2,
+    xtest: xtest::Xf86vmode,
     xfixes: xfixes::XFixes,
     display: *mut xlib::Display,
     root: xlib::Window,
@@ -146,6 +151,7 @@ impl Display {
     pub fn open() -> Self {
         let xlib = xlib::Xlib::open().unwrap();
         let xinput2 = xinput2::XInput2::open().unwrap();
+        let xtest = xtest::Xf86vmode::open().unwrap();
         let xfixes = xfixes::XFixes::open().unwrap();
 
         let display = unsafe { (xlib.XOpenDisplay)(ptr::null()) };
@@ -157,6 +163,7 @@ impl Display {
         Display {
             xlib: xlib,
             xinput2: xinput2,
+            xtest: xtest,
             xfixes: xfixes,
             display: display,
             root: root,
@@ -168,7 +175,7 @@ impl Display {
         unsafe { (self.xlib.XConnectionNumber)(self.display) }
     }
 
-    pub fn grab_pointer(&self, event_mask: i64) {
+    pub fn grab_cursor(&self, event_mask: i64) {
         unsafe { (self.xlib.XGrabPointer)(
             self.display, self.root, xlib::True, event_mask as u32,
             xlib::GrabModeAsync, xlib::GrabModeAsync, 0, 0, xlib::CurrentTime
@@ -201,13 +208,12 @@ impl Display {
     }
 
     pub fn keysym_to_string(&self, keysym: KeySym) -> &str {
-        unsafe { CStr::from_ptr(
-            (self.xlib.XKeysymToString)(keysym)
-        ).to_str().unwrap() }
+        unsafe { str::from_utf8_unchecked(
+            CStr::from_ptr((self.xlib.XKeysymToString)(keysym)).to_bytes()
+        )}
     }
 
     pub fn next_event(&self) -> Option<Event> {
-        // TODO: Would XEventsQueued with QueuedAlready make more sense?
         let num_events = unsafe { (self.xlib.XPending)(self.display) };
         if num_events <= 0 {
             return None;
@@ -258,37 +264,11 @@ impl Display {
         })
     }
 
-    pub fn query_pointer(&self) -> (i32, i32) {
-        unsafe {
-            let mut root = mem::uninitialized();
-            let mut child = mem::uninitialized();
-            let mut root_x = mem::uninitialized();
-            let mut root_y = mem::uninitialized();
-            let mut child_x = mem::uninitialized();
-            let mut child_y = mem::uninitialized();
-            let mut mask = mem::uninitialized();
-
-            (self.xlib.XQueryPointer)(self.display, self.root,
-                &mut root, &mut child, &mut root_x, &mut root_y,
-                &mut child_x, &mut child_y, &mut mask
-            );
-
-            (root_x, root_y)
-        }
-    }
-
-    pub fn query_screen(&self) -> (i32, i32) {
-        let screen = unsafe {
-            &*(self.xlib.XDefaultScreenOfDisplay)(self.display)
-        };
-        (screen.width, screen.height)
-    }
-
     pub fn select_input(&self, event_mask: i64) {
         unsafe { (self.xlib.XSelectInput)(self.display, self.root, event_mask) };
     }
 
-    pub fn ungrab_pointer(&self) {
+    pub fn ungrab_cursor(&self) {
         unsafe { (self.xlib.XUngrabPointer)(self.display, xlib::CurrentTime) };
     }
 
@@ -299,12 +279,6 @@ impl Display {
     pub fn ungrab_key(&self, keycode: xlib::KeyCode, modifiers: u32) {
         unsafe { (self.xlib.XUngrabKey)(
             self.display, keycode as i32, modifiers, self.root
-        ) };
-    }
-
-    pub fn warp_pointer(&self, x: i32, y: i32) {
-        unsafe { (self.xlib.XWarpPointer)(
-            self.display, 0, self.root, 0, 0, 0, 0, x, y
         ) };
     }
 
@@ -323,6 +297,111 @@ impl Display {
 
     pub fn hide_cursor(&self) {
         unsafe { (self.xfixes.XFixesHideCursor)(self.display, self.root) };
+    }
+
+    // general interface
+    pub fn screen_size(&self) -> (i32, i32) {
+        let screen = unsafe {
+            &*(self.xlib.XDefaultScreenOfDisplay)(self.display)
+        };
+        (screen.width, screen.height)
+    }
+
+    pub fn cursor_pos(&self) -> (i32, i32) {
+        unsafe {
+            let mut root = mem::uninitialized();
+            let mut child = mem::uninitialized();
+            let mut root_x = mem::uninitialized();
+            let mut root_y = mem::uninitialized();
+            let mut child_x = mem::uninitialized();
+            let mut child_y = mem::uninitialized();
+            let mut mask = mem::uninitialized();
+
+            (self.xlib.XQueryPointer)(self.display, self.root,
+                &mut root, &mut child, &mut root_x, &mut root_y,
+                &mut child_x, &mut child_y, &mut mask
+            );
+
+            (root_x, root_y)
+        }
+    }
+
+    pub fn move_cursor(&mut self, x: i32, y: i32) {
+        unsafe { (self.xlib.XWarpPointer)(
+            self.display, 0, self.root, 0, 0, 0, 0, x, y
+        ) };
+    }
+
+    pub fn set_key(&mut self, key: Key, is_press: bool) {
+        unsafe {
+            let keysym = match key {
+                Key::ControlL => XK_Control_L,
+                Key::ControlR => XK_Control_R,
+                Key::AltL => XK_Alt_L,
+                Key::AltR => XK_Alt_R,
+                Key::ShiftL => XK_Shift_L,
+                Key::ShiftR => XK_Shift_R,
+                Key::SuperL => XK_Super_L,
+                Key::SuperR => XK_Super_L,
+                Key::CapsLock => XK_Caps_Lock,
+                Key::Space => XK_space,
+                Key::Enter => XK_Return,
+                Key::Tab => XK_Tab,
+                Key::Backspace => XK_BackSpace,
+                Key::Delete => XK_Delete,
+                Key::Num0 => XK_0,
+                Key::Num1 => XK_1,
+                Key::Num2 => XK_2,
+                Key::Num3 => XK_3,
+                Key::Num4 => XK_4,
+                Key::Num5 => XK_5,
+                Key::Num6 => XK_6,
+                Key::Num7 => XK_7,
+                Key::Num8 => XK_8,
+                Key::Num9 => XK_9,
+                Key::A => XK_A,
+                Key::B => XK_B,
+                Key::C => XK_C,
+                Key::D => XK_D,
+                Key::E => XK_E,
+                Key::F => XK_F,
+                Key::G => XK_G,
+                Key::H => XK_H,
+                Key::I => XK_I,
+                Key::J => XK_J,
+                Key::K => XK_K,
+                Key::L => XK_L,
+                Key::M => XK_M,
+                Key::N => XK_N,
+                Key::O => XK_O,
+                Key::P => XK_P,
+                Key::Q => XK_Q,
+                Key::R => XK_R,
+                Key::S => XK_S,
+                Key::T => XK_T,
+                Key::U => XK_U,
+                Key::V => XK_V,
+                Key::W => XK_W,
+                Key::Y => XK_Y,
+                Key::X => XK_X,
+                Key::Z => XK_Z,
+                Key::F1 => XK_F1,
+                Key::F2 => XK_F2,
+                Key::F3 => XK_F3,
+                Key::F4 => XK_F4,
+                Key::F5 => XK_F5,
+                Key::F6 => XK_F6,
+                Key::F7 => XK_F7,
+                Key::F8 => XK_F8,
+                Key::F9 => XK_F9,
+                Key::F10 => XK_F10,
+                Key::F11 => XK_F11,
+                Key::F12 => XK_F12,
+            };
+
+            let keycode = (self.xlib.XKeysymToKeycode)(self.display, keysym as u64);
+            (self.xtest.XTestFakeKeyEvent)(self.display, keycode as u32, is_press as i32, 0);
+        }
     }
 }
 
