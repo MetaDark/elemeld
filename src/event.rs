@@ -3,8 +3,36 @@
 //     fn set_key(&mut self, key: Key, is_press: bool);
 // }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub enum Server {
+    CursorMotion(CursorMotion),
+    CursorClick(CursorClick),
+    Keyboard(Keyboard),
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CursorMotion {
+    pub x: i32,
+    pub y: i32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CursorClick {
+    pub button: CursorButton,
+    pub state: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy)]
+pub enum CursorButton { Left, Right, Middle }
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Keyboard {
+    pub key: Key,
+    pub state: bool,
+}
+
 #[allow(dead_code)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Key {
     ControlL, ControlR,
     AltL, AltR,

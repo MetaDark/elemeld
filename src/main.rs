@@ -1,6 +1,10 @@
 #![allow(dead_code, unused_variables, unused_imports, non_upper_case_globals)]
+#![feature(custom_derive, plugin)]
+#![plugin(serde_macros)]
 
 extern crate mio;
+extern crate serde;
+extern crate serde_json;
 extern crate x11_dl;
 extern crate dylib;
 
@@ -9,16 +13,16 @@ mod x11;
 #[macro_use] mod link;
 mod xfixes;
 
-use event::Key;
 use x11::*;
-
 use mio::*;
 use mio::udp::UdpSocket;
 use std::net::{SocketAddr, SocketAddrV4};
 use std::str;
 
-const X11_TOKEN: Token = Token(0);
-const NET_TOKEN: Token = Token(1);
+use std::cell::Cell;
+
+const X11_EVENT: Token = Token(0);
+const NET_EVENT: Token = Token(1);
 
 fn main() {
     let mut event_loop = EventLoop::new().unwrap();
@@ -42,6 +46,10 @@ struct Server {
     x: i32, y: i32,
     real_x: i32, real_y: i32,
     width: i32, height: i32,
+
+    // Debug
+    bytes: Cell<usize>,
+    packets: Cell<usize>,
 }
 
 struct Config {
@@ -68,12 +76,13 @@ impl Server {
 
         let x11_socket = Io::from_raw_fd(display.connection_number());
         event_loop.register(&x11_socket,
-                            X11_TOKEN,
+                            X11_EVENT,
                             EventSet::readable(),
                             PollOpt::level()).unwrap();
 
         // Setup UDP socket
         let udp_socket = UdpSocket::v4().unwrap();
+        udp_socket.set_multicast_loop(false).unwrap();
         udp_socket.join_multicast(&IpAddr::V4(config.addr)).unwrap();
         udp_socket.bind(&SocketAddr::V4(
             SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), config.port)
@@ -81,7 +90,7 @@ impl Server {
 
         // Listen for UDP connections
         event_loop.register(&udp_socket,
-                            NET_TOKEN,
+                            NET_EVENT,
                             EventSet::readable(),
                             PollOpt::edge()).unwrap();
 
@@ -100,6 +109,9 @@ impl Server {
             x: x, y: y,
             real_x: x, real_y: y,
             width: width, height: height,
+
+            bytes: Cell::new(0),
+            packets: Cell::new(0),
         }
     }
 
@@ -114,7 +126,11 @@ impl Server {
         self.y += y - self.real_y;
         self.real_x = x;
         self.real_y = y;
-        self.send_to_all(&format!("cursor {} {}", self.x, self.y));
+
+        self.send_to_all(&[event::Server::CursorMotion(event::CursorMotion {
+            x: self.x,
+            y: self.y,
+        })]);
 
         if self.cursor_in_screen() {
             self.focus();
@@ -152,31 +168,45 @@ impl Server {
         self.real_x = self.width / 2;
         self.real_y = self.height / 2;
         self.display.move_cursor(self.real_x, self.real_y);
-        self.display.next_event(); // consume mouse event
     }
 
     fn restore_cursor(&mut self) {
         self.real_x = self.x;
         self.real_y = self.y;
         self.display.move_cursor(self.real_x, self.real_y);
-        self.display.next_event(); // consume mouse event
     }
 
     // network functions
-    fn send_to(&self, buf: &str, addr: &SocketAddr) -> Option<usize> {
-        self.udp_socket.send_to(buf.as_bytes(), &addr).unwrap()
+    fn send_to(&self, events: &[event::Server], addr: &SocketAddr) -> Option<usize> {
+        let msg = serde_json::to_string(&events).unwrap();
+
+        // Debug
+        self.bytes.set(self.bytes.get() + msg.len() + 28);
+        self.packets.set(self.packets.get() + 1);
+        println!("message: {}", msg);
+        println!("bytes: {} | packets: {}", self.bytes.get(), self.packets.get());
+
+        self.udp_socket.send_to(msg.as_bytes(), &addr).unwrap()
     }
 
-    fn send_to_all(&self, buf: &str) -> Option<usize> {
+    fn send_to_all(&self, events: &[event::Server]) -> Option<usize> {
         let multicast_addr = SocketAddr::V4(SocketAddrV4::new(self.config.addr, self.config.port));
-        self.send_to(buf, &multicast_addr)
+        self.send_to(events, &multicast_addr)
     }
 
-    fn recv_from(&self) -> Option<(String, SocketAddr)> {
+    fn recv_from(&self) -> Option<(Vec<event::Server>, SocketAddr)> {
         let mut buf = [0; 256];
         match self.udp_socket.recv_from(&mut buf).unwrap() {
-            Some((len, addr)) =>
-                Some((String::from(str::from_utf8(&buf[..len]).unwrap()), addr)),
+            Some((len, addr)) => {
+                let buf = &buf[..len];
+                Some((match serde_json::from_slice(buf) {
+                    Ok(event) => event,
+                    Err(e) => {
+                        println!("{:?}: {}", e, String::from_utf8_lossy(buf));
+                        return None;
+                    },
+                }, addr))
+            },
             None => None,
         }
     }
@@ -189,42 +219,69 @@ impl Handler for Server {
     #[allow(unused_variables)]
     fn ready(&mut self, event_loop: &mut EventLoop<Self>, token: Token, events: EventSet) {
         match token {
-            X11_TOKEN => {
+            X11_EVENT => {
                 match self.display.next_event() {
-                    Some(Event::MotionNotify(e)) => {
-                        self.update_cursor(e.x_root, e.y_root);
-                    },
-                    Some(Event::KeyPress(e)) => {
-                        let keysym = self.display.keycode_to_keysym(e.keycode as u8, 0);
+                    Some(Event::MotionNotify(event)) =>
+                        self.update_cursor(event.x_root, event.y_root),
+                    Some(Event::KeyPress(event)) => {
+                        let keysym = self.display.keycode_to_keysym(event.keycode as u8, 0);
                         match keysym as u32 {
-                            XK_Escape => { if e.state == AltLMask {
+                            XK_Escape => { if event.state == AltLMask {
                                 println!("Alt-Escape");
                             } },
                             keysym => {
-                                self.send_to_all(&format!("key_down {}", keysym));
+                                let keysym = self.display.keycode_to_keysym(event.keycode as u8, 0);
+                                self.send_to_all(&[event::Server::Keyboard(event::Keyboard {
+                                    key: match keysym {
+                                        _ => event::Key::Space,
+                                    },
+                                    state: true,
+                                })]);
                             },
                         }
                     },
-                    Some(Event::KeyRelease(e)) => {
-                        let keysym = self.display.keycode_to_keysym(e.keycode as u8, 0);
-                        self.send_to_all(&format!("key_up {}", keysym));
+                    Some(Event::KeyRelease(event)) => {
+                        let keysym = self.display.keycode_to_keysym(event.keycode as u8, 0);
+                        self.send_to_all(&[event::Server::Keyboard(event::Keyboard {
+                            key: match keysym {
+                                _ => event::Key::Space,
+                            },
+                            state: false,
+                        })]);
                     },
-                    Some(Event::ButtonPress(e)) => {
-                        self.send_to_all(&format!("button_up {}", e.button));
+                    Some(Event::ButtonPress(event)) => {
+                        self.send_to_all(&[event::Server::CursorClick(event::CursorClick {
+                            button: match event.button {
+                                _ => event::CursorButton::Left,
+                            },
+                            state: true,
+                        })]);
                     },
-                    Some(Event::ButtonRelease(e)) => {
-                        self.send_to_all(&format!("button_up {}", e.button));
+                    Some(Event::ButtonRelease(event)) => {
+                        self.send_to_all(&[event::Server::CursorClick(event::CursorClick {
+                            button: match event.button {
+                                _ => event::CursorButton::Left,
+                            },
+                            state: false,
+                        })]);
                     },
-                    Some(Event::GenericEvent(e)) => { if e.evtype == XI_RawMotion {
+                    Some(Event::GenericEvent(event)) => { if event.evtype == XI_RawMotion {
                         let (x, y) = self.display.cursor_pos();
                         self.update_cursor(x, y);
                     } },
                     _ => (),
                 }
             },
-            NET_TOKEN => {
+            NET_EVENT => {
                 match self.recv_from() {
-                    Some((msg, addr)) => println!("{}", msg),
+                    Some((events, addr)) => for event in events { match event {
+                        event::Server::CursorMotion(event) =>
+                            self.display.move_cursor(event.x, event.y),
+                        event::Server::CursorClick(event) =>
+                            self.display.set_button(event.button, event.state),
+                        event::Server::Keyboard(event) =>
+                            self.display.set_key(event.key, event.state),
+                    } },
                     None => (),
                 }
             },

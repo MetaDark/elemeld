@@ -5,5 +5,8 @@ authors = ["MetaDark <kurt.bruneau@gmail.com>"]
 
 [dependencies]
 mio = "*"
+serde = "*"
+serde_json = "*"
+serde_macros = "*"
 x11-dl = "*"
 dylib = "*"

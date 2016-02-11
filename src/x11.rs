@@ -1,4 +1,4 @@
-use event::Key;
+use event::{Key, CursorButton};
 
 use std::{ptr, mem, str};
 use std::ffi::CStr;
@@ -83,7 +83,7 @@ pub use x11_dl::xlib::{
     Mod4Mask as SuperLMask,
     Mod5Mask,    // ?
 
-    // Mouse buttons
+    // Cursor buttons
     Button1,
     Button2,
     Button3,
@@ -326,81 +326,102 @@ impl Display {
         }
     }
 
-    pub fn move_cursor(&mut self, x: i32, y: i32) {
-        unsafe { (self.xlib.XWarpPointer)(
-            self.display, 0, self.root, 0, 0, 0, 0, x, y
-        ) };
+    unsafe fn consume_event(&self) {
+        let mut event = mem::uninitialized();
+        (self.xlib.XNextEvent)(self.display, &mut event);
     }
 
-    pub fn set_key(&mut self, key: Key, is_press: bool) {
+    pub fn move_cursor(&self, x: i32, y: i32) {
         unsafe {
-            let keysym = match key {
-                Key::ControlL => XK_Control_L,
-                Key::ControlR => XK_Control_R,
-                Key::AltL => XK_Alt_L,
-                Key::AltR => XK_Alt_R,
-                Key::ShiftL => XK_Shift_L,
-                Key::ShiftR => XK_Shift_R,
-                Key::SuperL => XK_Super_L,
-                Key::SuperR => XK_Super_L,
-                Key::CapsLock => XK_Caps_Lock,
-                Key::Space => XK_space,
-                Key::Enter => XK_Return,
-                Key::Tab => XK_Tab,
-                Key::Backspace => XK_BackSpace,
-                Key::Delete => XK_Delete,
-                Key::Num0 => XK_0,
-                Key::Num1 => XK_1,
-                Key::Num2 => XK_2,
-                Key::Num3 => XK_3,
-                Key::Num4 => XK_4,
-                Key::Num5 => XK_5,
-                Key::Num6 => XK_6,
-                Key::Num7 => XK_7,
-                Key::Num8 => XK_8,
-                Key::Num9 => XK_9,
-                Key::A => XK_A,
-                Key::B => XK_B,
-                Key::C => XK_C,
-                Key::D => XK_D,
-                Key::E => XK_E,
-                Key::F => XK_F,
-                Key::G => XK_G,
-                Key::H => XK_H,
-                Key::I => XK_I,
-                Key::J => XK_J,
-                Key::K => XK_K,
-                Key::L => XK_L,
-                Key::M => XK_M,
-                Key::N => XK_N,
-                Key::O => XK_O,
-                Key::P => XK_P,
-                Key::Q => XK_Q,
-                Key::R => XK_R,
-                Key::S => XK_S,
-                Key::T => XK_T,
-                Key::U => XK_U,
-                Key::V => XK_V,
-                Key::W => XK_W,
-                Key::Y => XK_Y,
-                Key::X => XK_X,
-                Key::Z => XK_Z,
-                Key::F1 => XK_F1,
-                Key::F2 => XK_F2,
-                Key::F3 => XK_F3,
-                Key::F4 => XK_F4,
-                Key::F5 => XK_F5,
-                Key::F6 => XK_F6,
-                Key::F7 => XK_F7,
-                Key::F8 => XK_F8,
-                Key::F9 => XK_F9,
-                Key::F10 => XK_F10,
-                Key::F11 => XK_F11,
-                Key::F12 => XK_F12,
-            };
+            (self.xlib.XWarpPointer)(self.display, 0, self.root, 0, 0, 0, 0, x, y);
+            self.consume_event();
+        };
+    }
 
+    pub fn set_button(&self, button: CursorButton, state: bool) {
+        println!("Fake click");
+        let button = match button {
+            CursorButton::Left => Button1,
+            CursorButton::Middle => Button3, // guessing
+            CursorButton::Right => Button2, // guessing
+        };
+
+        unsafe {
+            (self.xtest.XTestFakeButtonEvent)(self.display, button, state as i32, xlib::CurrentTime);
+            self.consume_event();
+        };
+    }
+
+    pub fn set_key(&self, key: Key, state: bool) {
+        let keysym = match key {
+            Key::ControlL => XK_Control_L,
+            Key::ControlR => XK_Control_R,
+            Key::AltL => XK_Alt_L,
+            Key::AltR => XK_Alt_R,
+            Key::ShiftL => XK_Shift_L,
+            Key::ShiftR => XK_Shift_R,
+            Key::SuperL => XK_Super_L,
+            Key::SuperR => XK_Super_L,
+            Key::CapsLock => XK_Caps_Lock,
+            Key::Space => XK_space,
+            Key::Enter => XK_Return,
+            Key::Tab => XK_Tab,
+            Key::Backspace => XK_BackSpace,
+            Key::Delete => XK_Delete,
+            Key::Num0 => XK_0,
+            Key::Num1 => XK_1,
+            Key::Num2 => XK_2,
+            Key::Num3 => XK_3,
+            Key::Num4 => XK_4,
+            Key::Num5 => XK_5,
+            Key::Num6 => XK_6,
+            Key::Num7 => XK_7,
+            Key::Num8 => XK_8,
+            Key::Num9 => XK_9,
+            Key::A => XK_A,
+            Key::B => XK_B,
+            Key::C => XK_C,
+            Key::D => XK_D,
+            Key::E => XK_E,
+            Key::F => XK_F,
+            Key::G => XK_G,
+            Key::H => XK_H,
+            Key::I => XK_I,
+            Key::J => XK_J,
+            Key::K => XK_K,
+            Key::L => XK_L,
+            Key::M => XK_M,
+            Key::N => XK_N,
+            Key::O => XK_O,
+            Key::P => XK_P,
+            Key::Q => XK_Q,
+            Key::R => XK_R,
+            Key::S => XK_S,
+            Key::T => XK_T,
+            Key::U => XK_U,
+            Key::V => XK_V,
+            Key::W => XK_W,
+            Key::Y => XK_Y,
+            Key::X => XK_X,
+            Key::Z => XK_Z,
+            Key::F1 => XK_F1,
+            Key::F2 => XK_F2,
+            Key::F3 => XK_F3,
+            Key::F4 => XK_F4,
+            Key::F5 => XK_F5,
+            Key::F6 => XK_F6,
+            Key::F7 => XK_F7,
+            Key::F8 => XK_F8,
+            Key::F9 => XK_F9,
+            Key::F10 => XK_F10,
+            Key::F11 => XK_F11,
+            Key::F12 => XK_F12,
+        };
+
+        unsafe {
             let keycode = (self.xlib.XKeysymToKeycode)(self.display, keysym as u64);
-            (self.xtest.XTestFakeKeyEvent)(self.display, keycode as u32, is_press as i32, 0);
+            (self.xtest.XTestFakeKeyEvent)(self.display, keycode as u32, state as i32, 0);
+            self.consume_event();
         }
     }
 }
