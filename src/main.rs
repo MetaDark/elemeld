@@ -21,14 +21,16 @@ const X11_TOKEN: Token = Token(0);
 const NET_TOKEN: Token = Token(1);
 
 fn main() {
-    let config = (Ipv4Addr::new(239, 255, 80, 80), 8080, 8080);
     let mut event_loop = EventLoop::new().unwrap();
-    let mut server = Server::new(&mut event_loop, config);
+    let mut server = Server::new(&mut event_loop, Config {
+        addr: Ipv4Addr::new(239, 255, 80, 80),
+        port: 8080,
+    });
     event_loop.run(&mut server).unwrap();
 }
 
 struct Server {
-    config: (Ipv4Addr, u16, u16),
+    config: Config,
 
     // I/O
     display: Display,
@@ -42,8 +44,13 @@ struct Server {
     width: i32, height: i32,
 }
 
+struct Config {
+    addr: Ipv4Addr,
+    port: u16,
+}
+
 impl Server {
-    fn new(event_loop: &mut EventLoop<Self>, config: (Ipv4Addr, u16, u16)) -> Self {
+    fn new(event_loop: &mut EventLoop<Self>, config: Config) -> Self {
         // Setup X11 display
         let display = Display::open();
 
@@ -67,9 +74,9 @@ impl Server {
 
         // Setup UDP socket
         let udp_socket = UdpSocket::v4().unwrap();
-        udp_socket.join_multicast(&IpAddr::V4(config.0)).unwrap();
+        udp_socket.join_multicast(&IpAddr::V4(config.addr)).unwrap();
         udp_socket.bind(&SocketAddr::V4(
-            SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), config.1)
+            SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), config.port)
         )).unwrap();
 
         // Listen for UDP connections
@@ -161,7 +168,7 @@ impl Server {
     }
 
     fn send_to_all(&self, buf: &str) -> Option<usize> {
-        let multicast_addr = SocketAddr::V4(SocketAddrV4::new(self.config.0, self.config.2));
+        let multicast_addr = SocketAddr::V4(SocketAddrV4::new(self.config.addr, self.config.port));
         self.send_to(buf, &multicast_addr)
     }
 
