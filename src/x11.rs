@@ -1,155 +1,35 @@
-use event::{Key, CursorButton};
+#![allow(non_upper_case_globals)]
+
+use io::{self, HostInterface};
+
+use x11_dl::keysym::*;
+use x11_dl::xlib;
+use x11_dl::xinput2;
+use x11_dl::xtest;
+use xfixes;
+use mio;
 
 use std::{ptr, mem, str};
-use std::ffi::CStr;
+use std::ffi::CString;
+use std::cell::Cell;
 
-use x11_dl::xlib;
-pub use x11_dl::xlib::{
-    // Events
-    XKeyPressedEvent,
-    XKeyReleasedEvent,
-    XButtonPressedEvent,
-    XButtonReleasedEvent,
-    XMotionEvent,
-    XEnterWindowEvent,
-    XLeaveWindowEvent,
-    XFocusInEvent,
-    XFocusOutEvent,
-    XKeymapEvent,
-    XExposeEvent,
-    XGraphicsExposeEvent,
-    XNoExposeEvent,
-    XVisibilityEvent,
-    XCreateWindowEvent,
-    XDestroyWindowEvent,
-    XUnmapEvent,
-    XMapEvent,
-    XMapRequestEvent,
-    XReparentEvent,
-    XConfigureEvent,
-    XConfigureRequestEvent,
-    XGravityEvent,
-    XResizeRequestEvent,
-    XCirculateEvent,
-    XCirculateRequestEvent,
-    XPropertyEvent,
-    XSelectionClearEvent,
-    XSelectionRequestEvent,
-    XSelectionEvent,
-    XColormapEvent,
-    XClientMessageEvent,
-    XMappingEvent,
-    XGenericEventCookie,
-
-    // Event masks
-    NoEventMask,
-    KeyPressMask,
-    KeyReleaseMask,
-    ButtonPressMask,
-    ButtonReleaseMask,
-    EnterWindowMask,
-    LeaveWindowMask,
-    PointerMotionMask,
-    PointerMotionHintMask,
-    Button1MotionMask,
-    Button2MotionMask,
-    Button3MotionMask,
-    Button4MotionMask,
-    Button5MotionMask,
-    ButtonMotionMask,
-    KeymapStateMask,
-    ExposureMask,
-    VisibilityChangeMask,
-    StructureNotifyMask,
-    ResizeRedirectMask,
-    SubstructureNotifyMask,
-    SubstructureRedirectMask,
-    FocusChangeMask,
-    PropertyChangeMask,
-    ColormapChangeMask,
-    OwnerGrabButtonMask,
-
-    // Key types
-    KeyCode,
-    KeySym,
-
-    // Keyboard modifiers
-    ShiftMask,   // Left?
-    LockMask,    // Left?
-    ControlMask, // Left?
-    Mod1Mask as AltLMask,
-    Mod2Mask,    // ?
-    Mod3Mask,    // ?
-    Mod4Mask as SuperLMask,
-    Mod5Mask,    // ?
-
-    // Cursor buttons
-    Button1,
-    Button2,
-    Button3,
-    Button4,
-    Button5,
-};
-
-use x11_dl::xinput2;
-pub use x11_dl::xinput2::{
-    // Macros
-    XISetMask,
-    XIClearMask,
-    XIMaskIsSet,
-
-    // XInput objects
-    XIAllDevices,
-    XIAllMasterDevices,
-    XIEventMask,
-
-    // Events
-    XI_DeviceChanged,
-    XI_KeyPress,
-    XI_KeyRelease,
-    XI_ButtonPress,
-    XI_ButtonRelease,
-    XI_Motion,
-    XI_Enter,
-    XI_Leave,
-    XI_FocusIn,
-    XI_FocusOut,
-    XI_HierarchyChanged,
-    XI_PropertyEvent,
-    XI_RawKeyPress,
-    XI_RawKeyRelease,
-    XI_RawButtonPress,
-    XI_RawButtonRelease,
-    XI_RawMotion,
-    XI_TouchBegin,
-    XI_TouchUpdate,
-    XI_TouchEnd,
-    XI_TouchOwnership,
-    XI_RawTouchBegin,
-    XI_RawTouchUpdate,
-    XI_RawTouchEnd,
-    XI_BarrierHit,
-    XI_BarrierLeave,
-    XI_LASTEVENT,
-};
-
-use x11_dl::xtest;
-
-use xfixes;
-pub use x11_dl::keysym::*;
-
-pub struct Display {
+pub struct X11Host {
     xlib: xlib::Xlib,
     xinput2: xinput2::XInput2,
     xtest: xtest::Xf86vmode,
     xfixes: xfixes::XFixes,
     display: *mut xlib::Display,
     root: xlib::Window,
+    last_pos: Cell<(i32, i32)>,
+    cursor_grabbed: Cell<bool>,
 }
 
-impl Display {
+impl X11Host {
     pub fn open() -> Self {
+        // Connect to display
         let xlib = xlib::Xlib::open().unwrap();
+
+        // FIXME: Should I use XQueryExtension for these extensions?
         let xinput2 = xinput2::XInput2::open().unwrap();
         let xtest = xtest::Xf86vmode::open().unwrap();
         let xfixes = xfixes::XFixes::open().unwrap();
@@ -160,154 +40,283 @@ impl Display {
         }
 
         let root = unsafe { (xlib.XDefaultRootWindow)(display) };
-        Display {
+        let host = X11Host {
             xlib: xlib,
             xinput2: xinput2,
             xtest: xtest,
             xfixes: xfixes,
             display: display,
             root: root,
-        }
+            last_pos: Cell::new((0, 0)),
+            cursor_grabbed: Cell::new(false),
+        };
+
+        // Initialize last_pos for computing deltas
+        host.last_pos.set(host.cursor_pos());
+
+        // Setup default events
+        let mut mask = [0u8; (xinput2::XI_LASTEVENT as usize + 7) / 8];
+        xinput2::XISetMask(&mut mask, xinput2::XI_RawMotion);
+
+        let mut events = [xinput2::XIEventMask {
+            deviceid: xinput2::XIAllMasterDevices,
+            mask_len: mask.len() as i32,
+            mask: &mut mask[0] as *mut u8,
+        }];
+
+        host.xi_select_events(&mut events);
+        host
     }
 
     // xlib interface
-    pub fn connection_number(&self) -> i32 {
+    fn connection_number(&self) -> i32 {
         unsafe { (self.xlib.XConnectionNumber)(self.display) }
     }
 
-    pub fn grab_cursor(&self, event_mask: i64) {
-        unsafe { (self.xlib.XGrabPointer)(
-            self.display, self.root, xlib::True, event_mask as u32,
-            xlib::GrabModeAsync, xlib::GrabModeAsync, 0, 0, xlib::CurrentTime
-        ) };
-    }
-
-    pub fn grab_keyboard(&self) {
-        unsafe { (self.xlib.XGrabKeyboard)(
-            self.display, self.root, xlib::True,
-            xlib::GrabModeAsync, xlib::GrabModeAsync, xlib::CurrentTime
-        ) };
-    }
-
-    pub fn grab_key(&self, keycode: xlib::KeyCode, modifiers: u32) {
+    fn next_event(&self) -> xlib::XEvent {
         unsafe {
-            (self.xlib.XGrabKey)(
-                self.display, keycode as i32, modifiers, self.root, xlib::True,
-                xlib::GrabModeAsync, xlib::GrabModeAsync
-            )
-        };
-    }
-
-    pub fn keycode_to_keysym(&self, keycode: KeyCode,
-                             index: i32) -> KeySym {
-        unsafe { (self.xlib.XKeycodeToKeysym)(self.display, keycode, index) }
-    }
-
-    pub fn keysym_to_keycode(&self, keysym: KeySym) -> KeyCode {
-        unsafe { (self.xlib.XKeysymToKeycode)(self.display, keysym) }
-    }
-
-    pub fn keysym_to_string(&self, keysym: KeySym) -> &str {
-        unsafe { str::from_utf8_unchecked(
-            CStr::from_ptr((self.xlib.XKeysymToString)(keysym)).to_bytes()
-        )}
-    }
-
-    pub fn next_event(&self) -> Option<Event> {
-        let num_events = unsafe { (self.xlib.XPending)(self.display) };
-        if num_events <= 0 {
-            return None;
-        }
-
-        let event = unsafe {
             let mut event = mem::uninitialized();
             (self.xlib.XNextEvent)(self.display, &mut event);
             event
-        };
-
-        Some(match event.get_type() {
-            xlib::KeyPress => Event::KeyPress(From::from(event)),
-            xlib::KeyRelease => Event::KeyRelease(From::from(event)),
-            xlib::ButtonPress => Event::ButtonPress(From::from(event)),
-            xlib::ButtonRelease => Event::ButtonRelease(From::from(event)),
-            xlib::MotionNotify => Event::MotionNotify(From::from(event)),
-            xlib::EnterNotify => Event::EnterNotify(From::from(event)),
-            xlib::LeaveNotify => Event::LeaveNotify(From::from(event)),
-            xlib::FocusIn => Event::FocusIn(From::from(event)),
-            xlib::FocusOut => Event::FocusOut(From::from(event)),
-            xlib::KeymapNotify => Event::KeymapNotify(From::from(event)),
-            xlib::Expose => Event::Expose(From::from(event)),
-            xlib::GraphicsExpose => Event::GraphicsExpose(From::from(event)),
-            xlib::NoExpose => Event::NoExpose(From::from(event)),
-            xlib::VisibilityNotify => Event::VisibilityNotify(From::from(event)),
-            xlib::CreateNotify => Event::CreateNotify(From::from(event)),
-            xlib::DestroyNotify => Event::DestroyNotify(From::from(event)),
-            xlib::UnmapNotify => Event::UnmapNotify(From::from(event)),
-            xlib::MapNotify => Event::MapNotify(From::from(event)),
-            xlib::MapRequest => Event::MapRequest(From::from(event)),
-            xlib::ReparentNotify => Event::ReparentNotify(From::from(event)),
-            xlib::ConfigureNotify => Event::ConfigureNotify(From::from(event)),
-            xlib::ConfigureRequest => Event::ConfigureRequest(From::from(event)),
-            xlib::GravityNotify => Event::GravityNotify(From::from(event)),
-            xlib::ResizeRequest => Event::ResizeRequest(From::from(event)),
-            xlib::CirculateNotify => Event::CirculateNotify(From::from(event)),
-            xlib::CirculateRequest => Event::CirculateRequest(From::from(event)),
-            xlib::PropertyNotify => Event::PropertyNotify(From::from(event)),
-            xlib::SelectionClear => Event::SelectionClear(From::from(event)),
-            xlib::SelectionRequest => Event::SelectionRequest(From::from(event)),
-            xlib::SelectionNotify => Event::SelectionNotify(From::from(event)),
-            xlib::ColormapNotify => Event::ColormapNotify(From::from(event)),
-            xlib::ClientMessage => Event::ClientMessage(From::from(event)),
-            xlib::MappingNotify => Event::MappingNotify(From::from(event)),
-            xlib::GenericEvent => Event::GenericEvent(From::from(event)),
-            _ => unreachable!(),
-        })
-    }
-
-    pub fn select_input(&self, event_mask: i64) {
-        unsafe { (self.xlib.XSelectInput)(self.display, self.root, event_mask) };
-    }
-
-    pub fn ungrab_cursor(&self) {
-        unsafe { (self.xlib.XUngrabPointer)(self.display, xlib::CurrentTime) };
-    }
-
-    pub fn ungrab_keyboard(&self) {
-        unsafe { (self.xlib.XUngrabKeyboard)(self.display, xlib::CurrentTime) };
-    }
-
-    pub fn ungrab_key(&self, keycode: xlib::KeyCode, modifiers: u32) {
-        unsafe { (self.xlib.XUngrabKey)(
-            self.display, keycode as i32, modifiers, self.root
-        ) };
+        }
     }
 
     // xinput2
-    pub fn xi_select_events(&self, mask: &mut [XIEventMask]) {
+    fn xi_select_events(&self, mask: &mut [xinput2::XIEventMask]) {
         unsafe { (self.xinput2.XISelectEvents)(
             self.display, self.root,
-            &mut mask[0] as *mut XIEventMask, mask.len() as i32
+            &mut mask[0] as *mut xinput2::XIEventMask, mask.len() as i32
         ) };
     }
 
-    // xfixes
-    pub fn show_cursor(&self) {
-        unsafe { (self.xfixes.XFixesShowCursor)(self.display, self.root) };
+    fn recv_generic_event(&self, cookie: xlib::XGenericEventCookie) -> Option<io::Event> {
+        // FIXME: Assert XInput2 extension in cookie.extension
+        assert_eq!(cookie.evtype, xinput2::XI_RawMotion);
+
+        let (x, y) = self.cursor_pos();
+        let (last_x, last_y) = self.last_pos.get();
+        let (dx, dy) = (x - last_x, y - last_y);
+        self.last_pos.set((x, y));
+
+        // Lock cursor to center when grabbed
+        if self.cursor_grabbed.get() {
+            let (width, height) = self.screen_size();
+            let (x, y) = (width / 2, height / 2);
+            self.send_position_event(io::PositionEvent { x: x, y: y });
+        }
+
+        Some(io::Event::Motion(io::MotionEvent { dx: dx, dy: dy }))
     }
 
-    pub fn hide_cursor(&self) {
-        unsafe { (self.xfixes.XFixesHideCursor)(self.display, self.root) };
-    }
-
-    // general interface
-    pub fn screen_size(&self) -> (i32, i32) {
-        let screen = unsafe {
-            &*(self.xlib.XDefaultScreenOfDisplay)(self.display)
+    fn recv_button_event(&self, event: xlib::XButtonEvent, state: bool) -> Option<io::Event> {
+        let button = match event.button {
+            xlib::Button1 => io::Button::Left,
+            xlib::Button2 => io::Button::Middle,
+            xlib::Button3 => io::Button::Right,
+            button => {
+                println!("Unexpected button press: {}", button);
+                return None
+            },
         };
-        (screen.width, screen.height)
+
+        Some(io::Event::Button(io::ButtonEvent {
+            button: button,
+            state: state,
+        }))
     }
 
-    pub fn cursor_pos(&self) -> (i32, i32) {
+    fn recv_key_event(&self, event: xlib::XKeyEvent, state: bool) -> Option<io::Event> {
+        let keysym = unsafe { (self.xlib.XKeycodeToKeysym)(self.display, event.keycode as u8, 0) };
+        let key = match keysym as u32 {
+            XK_Control_L => io::Key::ControlL,
+            XK_Control_R => io::Key::ControlR,
+            XK_Alt_L => io::Key::AltL,
+            XK_Alt_R => io::Key::AltR,
+            XK_Shift_L => io::Key::ShiftL,
+            XK_Shift_R => io::Key::ShiftR,
+            XK_Super_L => io::Key::SuperL,
+            XK_Super_R => io::Key::SuperR,
+            XK_Caps_Lock => io::Key::CapsLock,
+            XK_space => io::Key::Space,
+            XK_Return => io::Key::Enter,
+            XK_Tab => io::Key::Tab,
+            XK_BackSpace => io::Key::Backspace,
+            XK_Delete => io::Key::Delete,
+            XK_0 => io::Key::Num0,
+            XK_1 => io::Key::Num1,
+            XK_2 => io::Key::Num2,
+            XK_3 => io::Key::Num3,
+            XK_4 => io::Key::Num4,
+            XK_5 => io::Key::Num5,
+            XK_6 => io::Key::Num6,
+            XK_7 => io::Key::Num7,
+            XK_8 => io::Key::Num8,
+            XK_9 => io::Key::Num9,
+            XK_a => io::Key::A,
+            XK_b => io::Key::B,
+            XK_c => io::Key::C,
+            XK_d => io::Key::D,
+            XK_e => io::Key::E,
+            XK_f => io::Key::F,
+            XK_g => io::Key::G,
+            XK_h => io::Key::H,
+            XK_i => io::Key::I,
+            XK_j => io::Key::J,
+            XK_k => io::Key::K,
+            XK_l => io::Key::L,
+            XK_m => io::Key::M,
+            XK_n => io::Key::N,
+            XK_o => io::Key::O,
+            XK_p => io::Key::P,
+            XK_q => io::Key::Q,
+            XK_r => io::Key::R,
+            XK_s => io::Key::S,
+            XK_t => io::Key::T,
+            XK_u => io::Key::U,
+            XK_v => io::Key::V,
+            XK_w => io::Key::W,
+            XK_y => io::Key::Y,
+            XK_x => io::Key::X,
+            XK_z => io::Key::Z,
+            XK_F1 => io::Key::F1,
+            XK_F2 => io::Key::F2,
+            XK_F3 => io::Key::F3,
+            XK_F4 => io::Key::F4,
+            XK_F5 => io::Key::F5,
+            XK_F6 => io::Key::F6,
+            XK_F7 => io::Key::F7,
+            XK_F8 => io::Key::F8,
+            XK_F9 => io::Key::F9,
+            XK_F10 => io::Key::F10,
+            XK_F11 => io::Key::F11,
+            XK_F12 => io::Key::F12,
+            keysym => {
+                panic!(format!("Mapping for key not yet implemented: {}", unsafe {
+                    let key = (self.xlib.XKeysymToString)(keysym as u64);
+                    CString::from_raw(key).to_str().unwrap()
+                }))
+            },
+        };
+
+        Some(io::Event::Key(io::KeyEvent {
+            key: key,
+            state: state,
+        }))
+    }
+
+    pub fn send_position_event(&self, event: io::PositionEvent) {
+        unsafe {
+            self.last_pos.set((event.x, event.y));
+            (self.xlib.XWarpPointer)(self.display, 0, self.root, 0, 0, 0, 0, event.x, event.y);
+            (self.xlib.XFlush)(self.display);
+        };
+    }
+
+    pub fn send_motion_event(&self, event: io::MotionEvent) {
+        unsafe {
+            let (last_x, last_y) = self.last_pos.get();
+            self.last_pos.set((last_x + event.dx, last_y + event.dy));
+            (self.xlib.XWarpPointer)(self.display, 0, 0, 0, 0, 0, 0, event.dx, event.dy);
+            (self.xlib.XFlush)(self.display);
+        };
+    }
+
+    pub fn send_button_event(&self, event: io::ButtonEvent) {
+        let button = match event.button {
+            io::Button::Left => xlib::Button1,
+            io::Button::Middle => xlib::Button2,
+            io::Button::Right => xlib::Button3,
+        };
+
+        unsafe {
+            (self.xtest.XTestFakeButtonEvent)(self.display, button, event.state as i32, xlib::CurrentTime);
+            (self.xlib.XFlush)(self.display);
+        };
+    }
+
+    pub fn send_key_event(&self, event: io::KeyEvent) {
+        let keysym = match event.key {
+            io::Key::ControlL => XK_Control_L,
+            io::Key::ControlR => XK_Control_R,
+            io::Key::AltL => XK_Alt_L,
+            io::Key::AltR => XK_Alt_R,
+            io::Key::ShiftL => XK_Shift_L,
+            io::Key::ShiftR => XK_Shift_R,
+            io::Key::SuperR => XK_Super_R,
+            io::Key::SuperL => XK_Super_L,
+            io::Key::CapsLock => XK_Caps_Lock,
+            io::Key::Space => XK_space,
+            io::Key::Enter => XK_Return,
+            io::Key::Tab => XK_Tab,
+            io::Key::Backspace => XK_BackSpace,
+            io::Key::Delete => XK_Delete,
+            io::Key::Num0 => XK_0,
+            io::Key::Num1 => XK_1,
+            io::Key::Num2 => XK_2,
+            io::Key::Num3 => XK_3,
+            io::Key::Num4 => XK_4,
+            io::Key::Num5 => XK_5,
+            io::Key::Num6 => XK_6,
+            io::Key::Num7 => XK_7,
+            io::Key::Num8 => XK_8,
+            io::Key::Num9 => XK_9,
+            io::Key::A => XK_A,
+            io::Key::B => XK_B,
+            io::Key::C => XK_C,
+            io::Key::D => XK_D,
+            io::Key::E => XK_E,
+            io::Key::F => XK_F,
+            io::Key::G => XK_G,
+            io::Key::H => XK_H,
+            io::Key::I => XK_I,
+            io::Key::J => XK_J,
+            io::Key::K => XK_K,
+            io::Key::L => XK_L,
+            io::Key::M => XK_M,
+            io::Key::N => XK_N,
+            io::Key::O => XK_O,
+            io::Key::P => XK_P,
+            io::Key::Q => XK_Q,
+            io::Key::R => XK_R,
+            io::Key::S => XK_S,
+            io::Key::T => XK_T,
+            io::Key::U => XK_U,
+            io::Key::V => XK_V,
+            io::Key::W => XK_W,
+            io::Key::Y => XK_Y,
+            io::Key::X => XK_X,
+            io::Key::Z => XK_Z,
+            io::Key::F1 => XK_F1,
+            io::Key::F2 => XK_F2,
+            io::Key::F3 => XK_F3,
+            io::Key::F4 => XK_F4,
+            io::Key::F5 => XK_F5,
+            io::Key::F6 => XK_F6,
+            io::Key::F7 => XK_F7,
+            io::Key::F8 => XK_F8,
+            io::Key::F9 => XK_F9,
+            io::Key::F10 => XK_F10,
+            io::Key::F11 => XK_F11,
+            io::Key::F12 => XK_F12,
+        };
+
+        unsafe {
+            let keycode = (self.xlib.XKeysymToKeycode)(self.display, keysym as u64);
+            (self.xtest.XTestFakeKeyEvent)(self.display, keycode as u32, event.state as i32, 0);
+            (self.xlib.XFlush)(self.display);
+        };
+    }
+}
+
+impl HostInterface for X11Host {
+    fn screen_size(&self) -> (i32, i32) {
+        unsafe {
+            let screen = &*(self.xlib.XDefaultScreenOfDisplay)(self.display);
+            (screen.width, screen.height)
+        }
+    }
+
+    fn cursor_pos(&self) -> (i32, i32) {
         unsafe {
             let mut root = mem::uninitialized();
             let mut child = mem::uninitialized();
@@ -326,145 +335,98 @@ impl Display {
         }
     }
 
-    unsafe fn consume_event(&self) {
-        let mut event = mem::uninitialized();
-        (self.xlib.XNextEvent)(self.display, &mut event);
-    }
-
-    pub fn move_cursor(&self, x: i32, y: i32) {
-        unsafe {
-            (self.xlib.XWarpPointer)(self.display, 0, self.root, 0, 0, 0, 0, x, y);
-            self.consume_event();
-        };
-    }
-
-    pub fn set_button(&self, button: CursorButton, state: bool) {
-        println!("Fake click");
-        let button = match button {
-            CursorButton::Left => Button1,
-            CursorButton::Middle => Button3, // guessing
-            CursorButton::Right => Button2, // guessing
-        };
+    fn grab_cursor(&self) {
+        if self.cursor_grabbed.get() {
+            return;
+        }
 
         unsafe {
-            (self.xtest.XTestFakeButtonEvent)(self.display, button, state as i32, xlib::CurrentTime);
-            self.consume_event();
+            let mask = xlib::ButtonPressMask | xlib::ButtonReleaseMask;
+            (self.xlib.XGrabPointer)(
+                self.display, self.root, xlib::True, mask as u32,
+                xlib::GrabModeAsync, xlib::GrabModeAsync, 0, 0, xlib::CurrentTime
+            );
+            (self.xfixes.XFixesHideCursor)(self.display, self.root);
         };
+
+        self.cursor_grabbed.set(true);
     }
 
-    pub fn set_key(&self, key: Key, state: bool) {
-        let keysym = match key {
-            Key::ControlL => XK_Control_L,
-            Key::ControlR => XK_Control_R,
-            Key::AltL => XK_Alt_L,
-            Key::AltR => XK_Alt_R,
-            Key::ShiftL => XK_Shift_L,
-            Key::ShiftR => XK_Shift_R,
-            Key::SuperL => XK_Super_L,
-            Key::SuperR => XK_Super_L,
-            Key::CapsLock => XK_Caps_Lock,
-            Key::Space => XK_space,
-            Key::Enter => XK_Return,
-            Key::Tab => XK_Tab,
-            Key::Backspace => XK_BackSpace,
-            Key::Delete => XK_Delete,
-            Key::Num0 => XK_0,
-            Key::Num1 => XK_1,
-            Key::Num2 => XK_2,
-            Key::Num3 => XK_3,
-            Key::Num4 => XK_4,
-            Key::Num5 => XK_5,
-            Key::Num6 => XK_6,
-            Key::Num7 => XK_7,
-            Key::Num8 => XK_8,
-            Key::Num9 => XK_9,
-            Key::A => XK_A,
-            Key::B => XK_B,
-            Key::C => XK_C,
-            Key::D => XK_D,
-            Key::E => XK_E,
-            Key::F => XK_F,
-            Key::G => XK_G,
-            Key::H => XK_H,
-            Key::I => XK_I,
-            Key::J => XK_J,
-            Key::K => XK_K,
-            Key::L => XK_L,
-            Key::M => XK_M,
-            Key::N => XK_N,
-            Key::O => XK_O,
-            Key::P => XK_P,
-            Key::Q => XK_Q,
-            Key::R => XK_R,
-            Key::S => XK_S,
-            Key::T => XK_T,
-            Key::U => XK_U,
-            Key::V => XK_V,
-            Key::W => XK_W,
-            Key::Y => XK_Y,
-            Key::X => XK_X,
-            Key::Z => XK_Z,
-            Key::F1 => XK_F1,
-            Key::F2 => XK_F2,
-            Key::F3 => XK_F3,
-            Key::F4 => XK_F4,
-            Key::F5 => XK_F5,
-            Key::F6 => XK_F6,
-            Key::F7 => XK_F7,
-            Key::F8 => XK_F8,
-            Key::F9 => XK_F9,
-            Key::F10 => XK_F10,
-            Key::F11 => XK_F11,
-            Key::F12 => XK_F12,
-        };
+    fn ungrab_cursor(&self) {
+        if !self.cursor_grabbed.get() {
+            return;
+        }
 
         unsafe {
-            let keycode = (self.xlib.XKeysymToKeycode)(self.display, keysym as u64);
-            (self.xtest.XTestFakeKeyEvent)(self.display, keycode as u32, state as i32, 0);
-            self.consume_event();
+            (self.xlib.XUngrabPointer)(self.display, xlib::CurrentTime);
+            (self.xfixes.XFixesShowCursor)(self.display, self.root);
+        }
+
+        self.cursor_grabbed.set(false);
+    }
+
+    fn grab_keyboard(&self) {
+        unsafe { (self.xlib.XGrabKeyboard)(
+            self.display, self.root, xlib::True,
+            xlib::GrabModeAsync, xlib::GrabModeAsync, xlib::CurrentTime
+        ) };
+    }
+
+    fn ungrab_keyboard(&self) {
+        unsafe { (self.xlib.XUngrabKeyboard)(self.display, xlib::CurrentTime) };
+    }
+
+    fn recv_event(&self) -> Option<io::Event> {
+        let num_events = unsafe { (self.xlib.XPending)(self.display) };
+        if num_events <= 0 {
+            return None;
+        }
+
+        let event = self.next_event();
+        match event.get_type() {
+            xlib::GenericEvent => self.recv_generic_event(From::from(event)),
+            xlib::ButtonPress => self.recv_button_event(From::from(event), true),
+            xlib::ButtonRelease => self.recv_button_event(From::from(event), false),
+            xlib::KeyPress => self.recv_key_event(From::from(event), true),
+            xlib::KeyRelease => self.recv_key_event(From::from(event), false),
+            xlib::MappingNotify => None,
+            event => {
+                println!("Unexpected X11 event: {}", event);
+                None
+            },
+        }
+    }
+
+    fn send_event(&self, event: io::Event) {
+        match event {
+            io::Event::Position(event) => self.send_position_event(event),
+            io::Event::Motion(event) => self.send_motion_event(event),
+            io::Event::Button(event) => self.send_button_event(event),
+            io::Event::Key(event) => self.send_key_event(event),
         }
     }
 }
 
-impl Drop for Display {
-    fn drop(&mut self) {
-        unsafe { (self.xlib.XCloseDisplay)(self.display) };
+/*
+ * FIXME(Future):
+ * Method delegation: https://github.com/rust-lang/rfcs/pull/1406
+ */
+impl mio::Evented for X11Host {
+    fn register(&self, selector: &mut mio::Selector, token: mio::Token, interest: mio::EventSet, opts: mio::PollOpt) -> ::std::io::Result<()> {
+        selector.register(self.connection_number(), token, interest, opts)
+    }
+
+    fn reregister(&self, selector: &mut mio::Selector, token: mio::Token, interest: mio::EventSet, opts: mio::PollOpt) -> ::std::io::Result<()> {
+        selector.reregister(self.connection_number(), token, interest, opts)
+    }
+
+    fn deregister(&self, selector: &mut mio::Selector) -> ::std::io::Result<()> {
+        selector.deregister(self.connection_number())
     }
 }
 
-pub enum Event {
-    KeyPress(XKeyPressedEvent),
-    KeyRelease(XKeyReleasedEvent),
-    ButtonPress(XButtonPressedEvent),
-    ButtonRelease(XButtonReleasedEvent),
-    MotionNotify(XMotionEvent),
-    EnterNotify(XEnterWindowEvent),
-    LeaveNotify(XLeaveWindowEvent),
-    FocusIn(XFocusInEvent),
-    FocusOut(XFocusOutEvent),
-    KeymapNotify(XKeymapEvent),
-    Expose(XExposeEvent),
-    GraphicsExpose(XGraphicsExposeEvent),
-    NoExpose(XNoExposeEvent),
-    VisibilityNotify(XVisibilityEvent),
-    CreateNotify(XCreateWindowEvent),
-    DestroyNotify(XDestroyWindowEvent),
-    UnmapNotify(XUnmapEvent),
-    MapNotify(XMapEvent),
-    MapRequest(XMapRequestEvent),
-    ReparentNotify(XReparentEvent),
-    ConfigureNotify(XConfigureEvent),
-    ConfigureRequest(XConfigureRequestEvent),
-    GravityNotify(XGravityEvent),
-    ResizeRequest(XResizeRequestEvent),
-    CirculateNotify(XCirculateEvent),
-    CirculateRequest(XCirculateRequestEvent),
-    PropertyNotify(XPropertyEvent),
-    SelectionClear(XSelectionClearEvent),
-    SelectionRequest(XSelectionRequestEvent),
-    SelectionNotify(XSelectionEvent),
-    ColormapNotify(XColormapEvent),
-    ClientMessage(XClientMessageEvent),
-    MappingNotify(XMappingEvent),
-    GenericEvent(XGenericEventCookie),
+impl Drop for X11Host {
+    fn drop(&mut self) {
+        unsafe { (self.xlib.XCloseDisplay)(self.display) };
+    }
 }
