@@ -65,6 +65,6 @@ pub struct ButtonEvent {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct KeyEvent {
-    pub key: Key,
+    pub key: u64,
     pub state: bool,
 }
