@@ -45,8 +45,8 @@ struct Server {
     width: i32, height: i32,
 
     // Debug
-    bytes: Cell<usize>,
-    packets: Cell<usize>,
+    out_packets: Cell<usize>,
+    in_packets: Cell<usize>,
 }
 
 struct Config {
@@ -90,8 +90,8 @@ impl Server {
             x: x, y: y,
             width: width, height: height,
 
-            bytes: Cell::new(0),
-            packets: Cell::new(0),
+            out_packets: Cell::new(0),
+            in_packets: Cell::new(0),
         }
     }
 
@@ -119,13 +119,12 @@ impl Server {
 
     // Net functions
     fn send_to(&self, events: &[io::Event], addr: &SocketAddr) -> Option<usize> {
-        let msg = serde_json::to_string(&events).unwrap();
+        let id = self.out_packets.get();
+        let msg = serde_json::to_string(&(id, events)).unwrap();
 
         // Debug
-        self.bytes.set(self.bytes.get() + msg.len() + 28);
-        self.packets.set(self.packets.get() + 1);
-        println!("message: {}", msg);
-        println!("bytes: {} | packets: {}", self.bytes.get(), self.packets.get());
+        println!("=> {}", msg);
+        self.out_packets.set(self.out_packets.get() + 1);
 
         self.net.send_to(msg.as_bytes(), &addr).unwrap()
     }
@@ -139,13 +138,22 @@ impl Server {
         let mut buf = [0; 256];
         match self.net.recv_from(&mut buf).unwrap() {
             Some((len, addr)) => {
-                let msg = &buf[..len];
-                match serde_json::from_slice(msg) {
-                    Ok(events) => Some((events, addr)),
-                    Err(e) => {
-                        println!("{:?}: {}", e, String::from_utf8_lossy(msg));
-                        None
-                    },
+                let msg = str::from_utf8(&buf[..len]).unwrap();
+                let (id, events): (usize, Vec<io::Event>) = serde_json::from_str(msg).unwrap();
+
+                // Debug
+                println!("<= {}", msg);
+                let expected_id = self.in_packets.get();
+                if id < expected_id {
+                    println!("^ old packet");
+                    None
+                } else {
+                    if id > expected_id {
+                        println!("^ lost {} packets", id - expected_id)
+                    }
+
+                    self.in_packets.set(id + 1);
+                    Some((events, addr))
                 }
             },
             None => None,
@@ -195,7 +203,6 @@ impl Handler for Server {
             },
             NET_EVENT => match self.recv_from() {
                 Some((events, addr)) => for event in events {
-                    println!("{:?}", event);
                     match event {
                         io::Event::Position(event) => {
                             self.x = event.x;
