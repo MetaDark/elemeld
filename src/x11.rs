@@ -9,11 +9,10 @@ use x11_dl::xtest;
 use xfixes;
 use mio;
 
-use std::{ptr, mem, str};
-use std::ffi::CString;
+use std::{ptr, mem};
 use std::cell::Cell;
 
-pub struct X11Host {
+pub struct X11Interface {
     xlib: xlib::Xlib,
     xinput2: xinput2::XInput2,
     xtest: xtest::Xf86vmode,
@@ -24,7 +23,7 @@ pub struct X11Host {
     cursor_grabbed: Cell<bool>,
 }
 
-impl X11Host {
+impl X11Interface {
     pub fn open() -> Self {
         // Connect to display
         let xlib = xlib::Xlib::open().unwrap();
@@ -40,7 +39,7 @@ impl X11Host {
         }
 
         let root = unsafe { (xlib.XDefaultRootWindow)(display) };
-        let host = X11Host {
+        let host = X11Interface {
             xlib: xlib,
             xinput2: xinput2,
             xtest: xtest,
@@ -89,7 +88,7 @@ impl X11Host {
         ) };
     }
 
-    fn recv_generic_event(&self, cookie: xlib::XGenericEventCookie) -> Option<io::Event> {
+    fn recv_generic_event(&self, cookie: xlib::XGenericEventCookie) -> Option<io::HostEvent> {
         // FIXME: Assert XInput2 extension in cookie.extension
         assert_eq!(cookie.evtype, xinput2::XI_RawMotion);
 
@@ -105,10 +104,10 @@ impl X11Host {
             self.send_position_event(io::PositionEvent { x: x, y: y });
         }
 
-        Some(io::Event::Motion(io::MotionEvent { dx: dx, dy: dy }))
+        Some(io::HostEvent::Motion(io::MotionEvent { dx: dx, dy: dy }))
     }
 
-    fn recv_button_event(&self, event: xlib::XButtonEvent, state: bool) -> Option<io::Event> {
+    fn recv_button_event(&self, event: xlib::XButtonEvent, state: bool) -> Option<io::HostEvent> {
         let button = match event.button {
             xlib::Button1 => io::Button::Left,
             xlib::Button2 => io::Button::Middle,
@@ -119,21 +118,21 @@ impl X11Host {
             },
         };
 
-        Some(io::Event::Button(io::ButtonEvent {
+        Some(io::HostEvent::Button(io::ButtonEvent {
             button: button,
             state: state,
         }))
     }
 
-    fn recv_key_event(&self, event: xlib::XKeyEvent, state: bool) -> Option<io::Event> {
+    fn recv_key_event(&self, event: xlib::XKeyEvent, state: bool) -> Option<io::HostEvent> {
         let keysym = unsafe { (self.xlib.XKeycodeToKeysym)(self.display, event.keycode as u8, 0) };
-        Some(io::Event::Key(io::KeyEvent {
+        Some(io::HostEvent::Key(io::KeyEvent {
             key: keysym,
             state: state,
         }))
     }
 
-    pub fn send_position_event(&self, event: io::PositionEvent) {
+    fn send_position_event(&self, event: io::PositionEvent) {
         unsafe {
             self.last_pos.set((event.x, event.y));
             (self.xlib.XWarpPointer)(self.display, 0, self.root, 0, 0, 0, 0, event.x, event.y);
@@ -141,7 +140,7 @@ impl X11Host {
         };
     }
 
-    pub fn send_motion_event(&self, event: io::MotionEvent) {
+    fn send_motion_event(&self, event: io::MotionEvent) {
         unsafe {
             let (last_x, last_y) = self.last_pos.get();
             self.last_pos.set((last_x + event.dx, last_y + event.dy));
@@ -150,7 +149,7 @@ impl X11Host {
         };
     }
 
-    pub fn send_button_event(&self, event: io::ButtonEvent) {
+    fn send_button_event(&self, event: io::ButtonEvent) {
         let button = match event.button {
             io::Button::Left => xlib::Button1,
             io::Button::Middle => xlib::Button2,
@@ -163,7 +162,7 @@ impl X11Host {
         };
     }
 
-    pub fn send_key_event(&self, event: io::KeyEvent) {
+    fn send_key_event(&self, event: io::KeyEvent) {
         unsafe {
             let keycode = (self.xlib.XKeysymToKeycode)(self.display, event.key);
             (self.xtest.XTestFakeKeyEvent)(self.display, keycode as u32, event.state as i32, 0);
@@ -172,10 +171,11 @@ impl X11Host {
     }
 }
 
-impl HostInterface for X11Host {
+impl HostInterface for X11Interface {
     fn screen_size(&self) -> (i32, i32) {
         unsafe {
             let screen = &*(self.xlib.XDefaultScreenOfDisplay)(self.display);
+            assert!(screen.width > 0 && screen.height > 0);
             (screen.width, screen.height)
         }
     }
@@ -240,7 +240,7 @@ impl HostInterface for X11Host {
         unsafe { (self.xlib.XUngrabKeyboard)(self.display, xlib::CurrentTime) };
     }
 
-    fn recv_event(&self) -> Option<io::Event> {
+    fn recv_event(&self) -> Option<io::HostEvent> {
         let num_events = unsafe { (self.xlib.XPending)(self.display) };
         if num_events <= 0 {
             return None;
@@ -261,12 +261,12 @@ impl HostInterface for X11Host {
         }
     }
 
-    fn send_event(&self, event: io::Event) {
+    fn send_event(&self, event: io::HostEvent) {
         match event {
-            io::Event::Position(event) => self.send_position_event(event),
-            io::Event::Motion(event) => self.send_motion_event(event),
-            io::Event::Button(event) => self.send_button_event(event),
-            io::Event::Key(event) => self.send_key_event(event),
+            io::HostEvent::Position(event) => self.send_position_event(event),
+            io::HostEvent::Motion(event) => self.send_motion_event(event),
+            io::HostEvent::Button(event) => self.send_button_event(event),
+            io::HostEvent::Key(event) => self.send_key_event(event),
         }
     }
 }
@@ -275,7 +275,7 @@ impl HostInterface for X11Host {
  * FIXME(Future):
  * Method delegation: https://github.com/rust-lang/rfcs/pull/1406
  */
-impl mio::Evented for X11Host {
+impl mio::Evented for X11Interface {
     fn register(&self, selector: &mut mio::Selector, token: mio::Token, interest: mio::EventSet, opts: mio::PollOpt) -> ::std::io::Result<()> {
         selector.register(self.connection_number(), token, interest, opts)
     }
@@ -289,7 +289,7 @@ impl mio::Evented for X11Host {
     }
 }
 
-impl Drop for X11Host {
+impl Drop for X11Interface {
     fn drop(&mut self) {
         unsafe { (self.xlib.XCloseDisplay)(self.display) };
     }
