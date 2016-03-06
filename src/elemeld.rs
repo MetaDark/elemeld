@@ -11,7 +11,7 @@ pub struct Elemeld<H, N> where
     cluster: Cluster,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Clone, Copy, Debug)]
 enum State {
     Connecting,
     Ready,
@@ -50,12 +50,12 @@ impl<H, N> Elemeld<H, N> where
                 match event {
                     // Initialization events
                     io::NetEvent::Connect(cluster) => {
-                        self.cluster.merge(&cluster);
+                        self.cluster.merge(cluster);
                         self.net.send_to_all(&[io::NetEvent::Cluster(self.cluster.clone())]);
                         self.state = State::Connected;
                     },
                     io::NetEvent::Cluster(cluster) => {
-                        self.cluster.replace(&self.host, &cluster);
+                        self.cluster.replace(&self.host, cluster);
                         self.state = State::Connected;
                     },
 

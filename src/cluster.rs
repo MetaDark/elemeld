@@ -67,6 +67,22 @@ impl Cluster {
     pub fn locally_focused(&self) -> bool {
         self.focus == self.local
     }
+
+    pub fn reset_local(&mut self) {
+        for ip in util::my_ips().unwrap() {
+            for (i, screen) in self.screens.iter().enumerate() {
+                for addr in &screen.addrs {
+                    if addr.0.ip() == ip {
+                        println!("Local screen at {}", i);
+                        self.local = i as Index;
+                        return;
+                    }
+                }
+            }
+        }
+
+        panic!("Local IP was not found in cluster");
+    }
     
     pub fn refocus<H>(&mut self, host: &H, focus: Index, x: i32, y: i32, was_focused: bool) where
         H: io::HostInterface
@@ -161,8 +177,8 @@ impl Cluster {
     /**
      * Attempt to merge two clusters together
      */
-    pub fn merge(&mut self, other: &Self) {
-        'outer: for other_screen in &other.screens {
+    pub fn merge(&mut self, other: Self) {
+        'outer: for other_screen in other.screens {
             for other_addr in &other_screen.addrs {
                 for screen in &self.screens {
                     for addr in &screen.addrs {
@@ -175,42 +191,24 @@ impl Cluster {
             }
 
             // If new address, add new screen 
-            self.add(other_screen.clone());
+            self.add(other_screen);
         }
     }
 
     /**
      * Replace an existing cluster with a new cluster
      */
-    pub fn replace<H>(&mut self, host: &H, other: &Self) where
+    pub fn replace<H>(&mut self, host: &H, mut other: Self) where
         H: io::HostInterface
     {
-        let was_focused = self.locally_focused();
-        *self = other.clone();
-        self.reset_local();
-        
         let (focus, x, y) =
-            (self.focus,
-             self.pos.x,
-             self.pos.y);
+            (other.focus,
+             other.pos.x,
+             other.pos.y);
         
-        self.refocus(host, focus, x, y, was_focused);
-    }
-
-    pub fn reset_local(&mut self) {
-        'outer: for ip in util::my_ips().unwrap() {
-            for (i, screen) in self.screens.iter().enumerate() {
-                for addr in &screen.addrs {
-                    if addr.0.ip() == ip {
-                        println!("Local screen at {}", i);
-                        self.local = i as Index;
-                        return;
-                    }
-                }
-            }
-        }
-
-        panic!("Local IP was not found in cluster");
+        other.reset_local();
+        other.refocus(host, focus, x, y, self.locally_focused());
+        *self = other;
     }
 }
 
@@ -250,7 +248,7 @@ impl Screen {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 struct Addr(net::SocketAddr);
 
 impl serde::Serialize for Addr {
@@ -283,13 +281,13 @@ impl serde::Deserialize for Addr {
     }
 }
 
-#[derive(Copy, Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 struct Dimensions {
     x: i32,
     y: i32,
 }
 
-#[derive(Copy, Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 struct Edges {
     top: Option<Index>,
     right: Option<Index>,

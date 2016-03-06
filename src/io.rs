@@ -35,7 +35,7 @@ pub enum NetEvent {
     Key(KeyEvent),
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Copy, Clone)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug)]
 pub enum Button { Left, Right, Middle }
 
 #[derive(Serialize, Deserialize, Debug)]
