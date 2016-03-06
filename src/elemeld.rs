@@ -55,13 +55,14 @@ impl<H, N> Elemeld<H, N> where
                         self.state = State::Connected;
                     },
                     io::NetEvent::Cluster(cluster) => {
-                        self.cluster.replace(&cluster);
+                        self.cluster.replace(&self.host, &cluster);
                         self.state = State::Connected;
                     },
 
                     // Global events
                     io::NetEvent::Focus(focus, pos) => {
-                        self.cluster.refocus(&self.host, focus, pos.x, pos.y);
+                        let was_focused = self.cluster.locally_focused();
+                        self.cluster.refocus(&self.host, focus, pos.x, pos.y, was_focused);
                         self.host.send_event(io::HostEvent::Position(io::PositionEvent {
                             x: pos.x,
                             y: pos.y,
