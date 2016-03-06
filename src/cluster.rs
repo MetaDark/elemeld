@@ -1,5 +1,6 @@
 use io;
 use elemeld::Elemeld;
+use util;
 
 use serde;
 use std::net;
@@ -9,6 +10,7 @@ pub type Index = u8;
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Cluster {
     screens: Vec<Screen>,
+    local: Index,
     focus: Index,
     pos: Dimensions,
 }
@@ -17,6 +19,7 @@ impl Cluster {
     pub fn new(width: i32, height: i32, x: i32, y: i32) -> Self {
         Cluster {
             screens: vec![Screen::new(width, height)],
+            local: 0,
             focus: 0,
             pos: Dimensions { x: x , y: y },
         }
@@ -26,7 +29,7 @@ impl Cluster {
         where H: io::HostInterface
     {
         match host.recv_event() {
-            Some(io::HostEvent::Motion(event)) => {
+            Some(io::HostEvent::Motion(event)) =>
                 if event.dx != 0 || event.dy != 0 {
                     let (focus, x, y, was_focused) =
                         (self.focus,
@@ -38,21 +41,15 @@ impl Cluster {
                     Some(io::NetEvent::Focus(self.focus, io::PositionEvent {
                         x: self.pos.x, y: self.pos.y,
                     }))
-                } else {
-                    None
-                }
-            },
-            Some(event) => {
+                } else { None },
+            Some(event) =>
                 if !self.locally_focused() {
                     match event {
                         io::HostEvent::Button(event) => Some(io::NetEvent::Button(event)),
                         io::HostEvent::Key(event) => Some(io::NetEvent::Key(event)),
                         _ => None,
                     }
-                } else {
-                    None
-                }
-            }
+                } else { None },
             None => None,
         }
     }
@@ -64,13 +61,11 @@ impl Cluster {
                 io::NetEvent::Key(event) => Some(io::HostEvent::Key(event)),
                 _ => None,
             }
-        } else {
-            return None
-        }
+        } else { None }
     }
 
     pub fn locally_focused(&self) -> bool {
-        self.screens[self.focus as usize].is_local()
+        self.focus == self.local
     }
     
     pub fn refocus<H>(&mut self, host: &H, focus: Index, x: i32, y: i32, was_focused: bool) where
@@ -83,13 +78,13 @@ impl Cluster {
         
         if self.locally_focused() {
             if !was_focused {
-                host.send_event(io::HostEvent::Position(io::PositionEvent {
-                    x: self.pos.x, y: self.pos.y,
-                }));
-
                 host.ungrab_cursor();
                 host.ungrab_keyboard();
             }
+            
+            host.send_event(io::HostEvent::Position(io::PositionEvent {
+                x: self.pos.x, y: self.pos.y,
+            }));
         } else {
             if was_focused {
                 host.grab_cursor();
@@ -108,7 +103,7 @@ impl Cluster {
     }
 
     fn normalize_x(&self, focus: Index, x: i32) -> (Index, i32) {
-        let screen = self.screens[focus as usize];
+        let screen = &self.screens[focus as usize];
         if self.pos.x < 20 {
             match screen.edges.left {
                 Some(focus) => return self.normalize_x(focus, x + self.screens[focus as usize].size.x - 40),
@@ -125,7 +120,7 @@ impl Cluster {
     }
 
     fn normalize_y(&self, focus: Index, y: i32) -> (Index, i32) {
-        let screen = self.screens[focus as usize];
+        let screen = &self.screens[focus as usize];
         if self.pos.y < 20 {
             match screen.edges.top {
                 Some(focus) => return self.normalize_y(focus, y + self.screens[focus as usize].size.y - 40),
@@ -166,34 +161,21 @@ impl Cluster {
     /**
      * Attempt to merge two clusters together
      */
-    pub fn merge(&mut self, other: &Self, src: net::SocketAddr) {
+    pub fn merge(&mut self, other: &Self) {
         'outer: for other_screen in &other.screens {
-            // Interpret other's None addresses as the src address
-            let other_addr = match other_screen.addr {
-                Some(addr) => addr.0,
-                None => src,
-            };
-
-            for screen in &mut self.screens {
-                // Interpret self's None addresses as a null address
-                // TODO: Use getifaddrs to lookup matching interface address
-                let screen_addr = match screen.addr {
-                    Some(addr) => addr.0,
-                    None => net::SocketAddr::V4(net::SocketAddrV4::new(net::Ipv4Addr::new(0, 0, 0, 0), 0)),
-                };
-
-                // If same address, replace screen with other_screen
-                if screen_addr == other_addr {
-                    // TODO: Merge screen properties
-                    // *screen = *other_screen;
-                    continue 'outer;
+            for other_addr in &other_screen.addrs {
+                for screen in &self.screens {
+                    for addr in &screen.addrs {
+                        if addr.0.ip() == other_addr.0.ip() {
+                            // TODO: Merge screens
+                            continue 'outer;
+                        }
+                    }
                 }
             }
 
             // If new address, add new screen 
-            let mut new_screen = *other_screen;
-            new_screen.addr = Some(SocketAddr(src));
-            self.add(new_screen);
+            self.add(other_screen.clone());
         }
     }
 
@@ -205,6 +187,8 @@ impl Cluster {
     {
         let was_focused = self.locally_focused();
         *self = other.clone();
+        self.reset_local();
+        
         let (focus, x, y) =
             (self.focus,
              self.pos.x,
@@ -212,19 +196,49 @@ impl Cluster {
         
         self.refocus(host, focus, x, y, was_focused);
     }
+
+    pub fn reset_local(&mut self) {
+        'outer: for ip in util::my_ips().unwrap() {
+            for (i, screen) in self.screens.iter().enumerate() {
+                for addr in &screen.addrs {
+                    if addr.0.ip() == ip {
+                        println!("Local screen at {}", i);
+                        self.local = i as Index;
+                        return;
+                    }
+                }
+            }
+        }
+
+        panic!("Local IP was not found in cluster");
+    }
 }
 
-#[derive(Copy, Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 struct Screen {
     size: Dimensions,
     edges: Edges,
-    addr: Option<SocketAddr>,
+    addrs: Vec<Addr>,
 }
 
 impl Screen {
     pub fn new(width: i32, height: i32) -> Self {
+        let port = 8080; // FIXME: Get from config
         Screen {
-            addr: None, // None implies local machine
+            addrs: util::my_ips().unwrap().into_iter()
+                .filter_map(|addr| match addr {
+                    net::IpAddr::V4(addr) =>
+                        if !addr.is_loopback() {
+                            Some(net::SocketAddr::V4(net::SocketAddrV4::new(addr, port)))
+                        } else { None },
+                    net::IpAddr::V6(addr) =>
+                        if !addr.is_loopback() {
+                            Some(net::SocketAddr::V6(net::SocketAddrV6::new(addr, port, 0, 0)))
+                        } else { None },
+                })
+                .map(|addr| Addr(addr))
+                .collect::<Vec<_>>(),
+            
             size: Dimensions { x: width, y: height },
             edges: Edges {
                 top: None,
@@ -234,16 +248,12 @@ impl Screen {
             }
         }
     }
-
-    pub fn is_local(&self) -> bool {
-        self.addr.is_none()
-    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
-struct SocketAddr(net::SocketAddr);
+struct Addr(net::SocketAddr);
 
-impl serde::Serialize for SocketAddr {
+impl serde::Serialize for Addr {
     fn serialize<S>(&self, serializer: &mut S) -> Result<(), S::Error>
         where S: serde::Serializer
     {
@@ -251,19 +261,19 @@ impl serde::Serialize for SocketAddr {
     }
 }
 
-impl serde::Deserialize for SocketAddr {
+impl serde::Deserialize for Addr {
     fn deserialize<D>(deserializer: &mut D) -> Result<Self, D::Error>
         where D: serde::Deserializer
     {
         struct SocketAddrVisitor;
         impl serde::de::Visitor for SocketAddrVisitor {
-            type Value = SocketAddr;
+            type Value = Addr;
 
             fn visit_str<E>(&mut self, val: &str) -> Result<Self::Value, E>
                 where E: serde::de::Error,
             {
                 match val.parse::<net::SocketAddr>() {
-                    Ok(addr) => Ok(SocketAddr(addr)),
+                    Ok(addr) => Ok(Addr(addr)),
                     Err(_) => Err(serde::de::Error::syntax("expected socket address")),
                 }
             }

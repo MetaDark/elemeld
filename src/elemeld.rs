@@ -50,7 +50,7 @@ impl<H, N> Elemeld<H, N> where
                 match event {
                     // Initialization events
                     io::NetEvent::Connect(cluster) => {
-                        self.cluster.merge(&cluster, addr);
+                        self.cluster.merge(&cluster);
                         self.net.send_to_all(&[io::NetEvent::Cluster(self.cluster.clone())]);
                         self.state = State::Connected;
                     },
@@ -63,17 +63,11 @@ impl<H, N> Elemeld<H, N> where
                     io::NetEvent::Focus(focus, pos) => {
                         let was_focused = self.cluster.locally_focused();
                         self.cluster.refocus(&self.host, focus, pos.x, pos.y, was_focused);
-                        self.host.send_event(io::HostEvent::Position(io::PositionEvent {
-                            x: pos.x,
-                            y: pos.y,
-                        }));
                     },
-
-                    // event => match self.cluster.filter_net_event(event) {
-                    //     Some(event) => { self.host.send_event(event); },
-                    //     None => (),
-                    // },
-                    _ => (),
+                    event => match self.cluster.filter_net_event(event) {
+                        Some(event) => { self.host.send_event(event); },
+                        None => (),
+                    },
                 }
             },
             None => (),
