@@ -30,7 +30,7 @@ pub enum HostEvent {
 pub enum NetEvent {
     Connect(cluster::Cluster),
     Cluster(cluster::Cluster),
-    Focus(cluster::Index, PositionEvent),
+    Focus(cluster::Focus),
     Button(ButtonEvent),
     Key(KeyEvent),
 }

@@ -8,11 +8,15 @@
 extern crate libc;
 extern crate nix;
 
+// Hacky work around for Xfixes
+extern crate dylib;
+#[macro_use] mod link;
+mod xfixes;
+
 extern crate mio;
 extern crate serde;
 extern crate serde_json;
 extern crate x11_dl;
-extern crate dylib;
 
 mod elemeld;
 mod cluster;
@@ -20,10 +24,6 @@ mod io;
 mod x11;
 mod ip;
 mod util;
-
-// Hacky work around for Xfixes
-#[macro_use] mod link;
-mod xfixes;
 
 use elemeld::Elemeld;
 use x11::X11Interface;

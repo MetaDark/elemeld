@@ -10,8 +10,13 @@ pub type Index = u8;
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Cluster {
     screens: Vec<Screen>,
-    local: Index,
-    focus: Index,
+    local_screen: Index,
+    focus: Focus,
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize, Debug)]
+pub struct Focus {
+    screen: Index,
     pos: Dimensions,
 }
 
@@ -19,9 +24,11 @@ impl Cluster {
     pub fn new(width: i32, height: i32, x: i32, y: i32) -> Self {
         Cluster {
             screens: vec![Screen::new(width, height)],
-            local: 0,
-            focus: 0,
-            pos: Dimensions { x: x , y: y },
+            local_screen: 0,
+            focus: Focus {
+                screen: 0,
+                pos: Dimensions { x: x , y: y },
+            },
         }
     }
     
@@ -31,16 +38,16 @@ impl Cluster {
         match host.recv_event() {
             Some(io::HostEvent::Motion(event)) =>
                 if event.dx != 0 || event.dy != 0 {
-                    let (focus, x, y, was_focused) =
-                        (self.focus,
-                         self.pos.x + event.dx,
-                         self.pos.y + event.dy,
-                         self.locally_focused());
+                    let focus = Focus {
+                        screen: self.focus.screen,
+                        pos: Dimensions {
+                            x: self.focus.pos.x + event.dx,
+                            y: self.focus.pos.y + event.dy,
+                        }
+                    };
                     
-                    self.refocus(host, focus, x, y, was_focused);
-                    Some(io::NetEvent::Focus(self.focus, io::PositionEvent {
-                        x: self.pos.x, y: self.pos.y,
-                    }))
+                    self.refocus(host, focus);
+                    Some(io::NetEvent::Focus(focus))
                 } else { None },
             Some(event) =>
                 if !self.locally_focused() {
@@ -64,17 +71,16 @@ impl Cluster {
         } else { None }
     }
 
-    pub fn locally_focused(&self) -> bool {
-        self.focus == self.local
+    fn locally_focused(&self) -> bool {
+        self.focus.screen == self.local_screen
     }
 
-    pub fn reset_local(&mut self) {
+    fn reset_local_screen(&mut self) {
         for ip in util::my_ips().unwrap() {
             for (i, screen) in self.screens.iter().enumerate() {
                 for addr in &screen.addrs {
                     if addr.0.ip() == ip {
-                        println!("Local screen at {}", i);
-                        self.local = i as Index;
+                        self.local_screen = i as Index;
                         return;
                     }
                 }
@@ -83,15 +89,18 @@ impl Cluster {
 
         panic!("Local IP was not found in cluster");
     }
-    
-    pub fn refocus<H>(&mut self, host: &H, focus: Index, x: i32, y: i32, was_focused: bool) where
+
+    pub fn refocus<H>(&mut self, host: &H, focus: Focus) where
         H: io::HostInterface
     {
-        let (focus, x, y) = self.normalize_focus(focus, x, y);
-        self.focus = focus;
-        self.pos.x = x;
-        self.pos.y = y;
-        
+        let was_focused = self.locally_focused();
+        self.private_refocus(host, focus, was_focused);
+    }
+    
+    fn private_refocus<H>(&mut self, host: &H, focus: Focus, was_focused: bool) where
+        H: io::HostInterface
+    {
+        self.focus = self.normalize_focus(focus);
         if self.locally_focused() {
             if !was_focused {
                 host.ungrab_cursor();
@@ -99,7 +108,7 @@ impl Cluster {
             }
             
             host.send_event(io::HostEvent::Position(io::PositionEvent {
-                x: self.pos.x, y: self.pos.y,
+                x: self.focus.pos.x, y: self.focus.pos.y,
             }));
         } else {
             if was_focused {
@@ -112,44 +121,49 @@ impl Cluster {
     /*
      * Walk through the screens untill the x and y are contained within a screen
      */
-    fn normalize_focus(&self, focus: Index, x: i32, y: i32) -> (Index, i32, i32) {
-        let (focus, x) = self.normalize_x(focus, x);
-        let (focus, y) = self.normalize_y(focus, y);
-        (focus, x, y)
+    fn normalize_focus(&self, focus: Focus) -> Focus {
+        let (screen, x, y) = (focus.screen, focus.pos.x, focus.pos.y);
+        let (screen, x) = self.normalize_x(screen, x);
+        let (screen, y) = self.normalize_y(screen, y);
+        
+        Focus {
+            screen: screen,
+            pos: Dimensions { x: x, y: y },
+        }
     }
 
     fn normalize_x(&self, focus: Index, x: i32) -> (Index, i32) {
         let screen = &self.screens[focus as usize];
-        if self.pos.x < 20 {
+        if x < 20 {
             match screen.edges.left {
-                Some(focus) => return self.normalize_x(focus, x + self.screens[focus as usize].size.x - 40),
-                None => (),
+                Some(focus) => self.normalize_x(focus, x + self.screens[focus as usize].size.x - 40),
+                None => (focus, 0),
             }
-        } else if self.pos.x >= screen.size.x - 20 {
+        } else if x >= screen.size.x - 20 {
             match screen.edges.right {
-                Some(focus) => return self.normalize_x(focus, x - screen.size.x + 40),
-                None => (),
+                Some(focus) => self.normalize_x(focus, x - screen.size.x + 40),
+                None => (focus, screen.size.x - 1),
             }
+        } else {
+            (focus, x)
         }
-
-        (focus, x)
     }
 
     fn normalize_y(&self, focus: Index, y: i32) -> (Index, i32) {
         let screen = &self.screens[focus as usize];
-        if self.pos.y < 20 {
+        if y < 20 {
             match screen.edges.top {
-                Some(focus) => return self.normalize_y(focus, y + self.screens[focus as usize].size.y - 40),
-                None => (),
+                Some(focus) => self.normalize_y(focus, y + self.screens[focus as usize].size.y - 40),
+                None => (focus, 0),
             }
-        } else if self.pos.y >= screen.size.y - 20 {
+        } else if y >= screen.size.y - 20 {
             match screen.edges.bottom {
-                Some(focus) => return self.normalize_y(focus, y - screen.size.y + 40),
-                None => (),
+                Some(focus) => self.normalize_y(focus, y - screen.size.y + 40),
+                None => (focus, screen.size.y - 1),
             }
+        } else {
+            (focus, y)
         }
-
-        (focus, y)
     }
 
     /**
@@ -201,13 +215,12 @@ impl Cluster {
     pub fn replace<H>(&mut self, host: &H, mut other: Self) where
         H: io::HostInterface
     {
-        let (focus, x, y) =
-            (other.focus,
-             other.pos.x,
-             other.pos.y);
+        other.reset_local_screen();
         
-        other.reset_local();
-        other.refocus(host, focus, x, y, self.locally_focused());
+        let focus = other.focus;
+        let was_focused = self.locally_focused();
+        other.private_refocus(host, focus, was_focused);
+        
         *self = other;
     }
 }
@@ -281,13 +294,13 @@ impl serde::Deserialize for Addr {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Copy, Serialize, Deserialize, Debug)]
 struct Dimensions {
     x: i32,
     y: i32,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Copy, Serialize, Deserialize, Debug)]
 struct Edges {
     top: Option<Index>,
     right: Option<Index>,

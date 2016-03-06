@@ -60,9 +60,8 @@ impl<H, N> Elemeld<H, N> where
                     },
 
                     // Global events
-                    io::NetEvent::Focus(focus, pos) => {
-                        let was_focused = self.cluster.locally_focused();
-                        self.cluster.refocus(&self.host, focus, pos.x, pos.y, was_focused);
+                    io::NetEvent::Focus(focus) => {
+                        self.cluster.refocus(&self.host, focus);
                     },
                     event => match self.cluster.filter_net_event(event) {
                         Some(event) => { self.host.send_event(event); },
