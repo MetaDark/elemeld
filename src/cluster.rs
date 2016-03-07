@@ -1,5 +1,5 @@
 use io;
-use elemeld::Elemeld;
+use elemeld::Config;
 use util;
 
 use serde;
@@ -32,11 +32,11 @@ impl Cluster {
         }
     }
     
-    pub fn filter_host_event<H>(&mut self, host: &H) -> Option<io::NetEvent>
+    pub fn process_host_event<H>(&mut self, host: &H, event: io::HostEvent) -> Option<io::NetEvent>
         where H: io::HostInterface
     {
-        match host.recv_event() {
-            Some(io::HostEvent::Motion(event)) =>
+        match event {
+            io::HostEvent::Motion(event) => {
                 if event.dx != 0 || event.dy != 0 {
                     let focus = Focus {
                         index: self.focus.index,
@@ -48,20 +48,21 @@ impl Cluster {
                     
                     self.refocus(host, focus);
                     Some(io::NetEvent::Focus(focus))
-                } else { None },
-            Some(event) =>
+                } else { None }
+            },
+            event => {
                 if !self.locally_focused() {
                     match event {
                         io::HostEvent::Button(event) => Some(io::NetEvent::Button(event)),
                         io::HostEvent::Key(event) => Some(io::NetEvent::Key(event)),
                         _ => None,
                     }
-                } else { None },
-            None => None,
+                } else { None }
+            },
         }
     }
 
-    pub fn filter_net_event(&mut self, event: io::NetEvent) -> Option<io::HostEvent> {
+    pub fn process_net_event(&mut self, event: io::NetEvent) -> Option<io::HostEvent> {
         if self.locally_focused() {
             match event {
                 io::NetEvent::Button(event) => Some(io::HostEvent::Button(event)),

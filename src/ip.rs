@@ -1,33 +1,28 @@
 use io::{self, NetInterface};
+use elemeld::Config;
 
 use mio;
 use serde_json;
 
-use std::str;
-use std::net::{SocketAddr, SocketAddrV4, Ipv4Addr};
+use std::{net, str};
 use std::cell::Cell;
 
-pub struct IpInterface {
-    config: Config,
+pub struct IpInterface<'a> {
+    config: &'a Config,
     socket: mio::udp::UdpSocket,
     out_packets: Cell<usize>,
     in_packets: Cell<usize>,
 }
 
-pub struct Config {
-    pub server_addr: Ipv4Addr,
-    pub multicast_addr: Ipv4Addr,
-    pub port: u16
-}
-
-impl IpInterface {
-    pub fn open(config: Config) -> Self {
+impl<'a> IpInterface<'a> {
+    pub fn open(config: &'a Config) -> Self {
         let socket = mio::udp::UdpSocket::v4().unwrap();
         socket.set_multicast_loop(false).unwrap();
-        socket.join_multicast(&mio::IpAddr::V4(config.multicast_addr)).unwrap();
-        socket.bind(&SocketAddr::V4(
-            SocketAddrV4::new(config.server_addr, config.port)
-        )).unwrap();
+        socket.join_multicast(&config.multicast_addr).unwrap();
+        socket.bind(&match config.server_addr {
+            mio::IpAddr::V4(addr) => net::SocketAddr::V4((net::SocketAddrV4::new(addr, config.port))),
+            mio::IpAddr::V6(addr) => net::SocketAddr::V6((net::SocketAddrV6::new(addr, config.port, 0, 0))),
+        }).unwrap();
 
         IpInterface {
             config: config,
@@ -38,8 +33,8 @@ impl IpInterface {
     }
 }
 
-impl NetInterface for IpInterface {
-    fn send_to(&self, events: &[io::NetEvent], addr: &SocketAddr) -> Option<usize> {
+impl<'a> NetInterface for IpInterface<'a> {
+    fn send_to(&self, events: &[io::NetEvent], addr: &net::SocketAddr) -> Option<usize> {
         let id = self.out_packets.get();
         let msg = serde_json::to_string(&(id, events)).unwrap();
         println!("=> {} {}", addr, msg);
@@ -56,11 +51,14 @@ impl NetInterface for IpInterface {
     }
 
     fn send_to_all(&self, events: &[io::NetEvent]) -> Option<usize> {
-        let multicast_addr = SocketAddr::V4(SocketAddrV4::new(self.config.multicast_addr, self.config.port));
-        self.send_to(events, &multicast_addr)
+        let addr = match self.config.multicast_addr {
+            mio::IpAddr::V4(addr) => net::SocketAddr::V4((net::SocketAddrV4::new(addr, self.config.port))),
+            mio::IpAddr::V6(addr) => net::SocketAddr::V6((net::SocketAddrV6::new(addr, self.config.port, 0, 0))),
+        };
+        self.send_to(events, &addr)
     }
 
-    fn recv_from(&self) -> Option<(Vec<io::NetEvent>, SocketAddr)> {
+    fn recv_from(&self) -> Option<(Vec<io::NetEvent>, net::SocketAddr)> {
         let mut buf = [0; 1024];
         match self.socket.recv_from(&mut buf).unwrap() {
             Some((len, addr)) => {
@@ -90,7 +88,7 @@ impl NetInterface for IpInterface {
  * FIXME(Future):
  * Method delegation: https://github.com/rust-lang/rfcs/pull/1406
  */
-impl mio::Evented for IpInterface {
+impl<'a> mio::Evented for IpInterface<'a> {
     fn register(&self, selector: &mut mio::Selector, token: mio::Token, interest: mio::EventSet, opts: mio::PollOpt) -> ::std::io::Result<()> {
         self.socket.register(selector, token, interest, opts)
     }
