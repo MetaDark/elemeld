@@ -42,7 +42,7 @@ impl NetInterface for IpInterface {
     fn send_to(&self, events: &[io::NetEvent], addr: &SocketAddr) -> Option<usize> {
         let id = self.out_packets.get();
         let msg = serde_json::to_string(&(id, events)).unwrap();
-        println!("=> {}", msg);
+        println!("=> {} {}", addr, msg);
         match self.socket.send_to(msg.as_bytes(), &addr).unwrap() {
             Some(size) => {
                 self.out_packets.set(id + 1);
@@ -65,7 +65,7 @@ impl NetInterface for IpInterface {
         match self.socket.recv_from(&mut buf).unwrap() {
             Some((len, addr)) => {
                 let msg = str::from_utf8(&buf[..len]).unwrap();
-                println!("<= {}", msg);
+                println!("<= {} {}", addr, msg);
                 
                 let (id, events): (usize, Vec<io::NetEvent>) = serde_json::from_str(msg).unwrap();
                 let expected_id = self.in_packets.get();

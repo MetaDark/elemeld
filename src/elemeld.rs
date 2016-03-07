@@ -14,7 +14,7 @@ pub struct Elemeld<H, N> where
 #[derive(Clone, Copy, Debug)]
 enum State {
     Connecting,
-    Ready,
+    Waiting,
     Connected,
 }
 
@@ -37,7 +37,17 @@ impl<H, N> Elemeld<H, N> where
     pub fn host_event(&mut self) {
         match self.state {
             State::Connected => match self.cluster.filter_host_event(&self.host) {
-                Some(event) => { self.net.send_to_all(&[event]); },
+                Some(event) => {
+                    match event {
+                        io::NetEvent::Focus(focus) => {
+                            self.net.send_to_all(&[event]);
+                        },
+                        event => {
+                            let addr = self.cluster.focused_screen().default_route();
+                            self.net.send_to(&[event], addr);
+                        }
+                    }
+                },
                 None => (),
             },
             _ => (),
@@ -51,7 +61,7 @@ impl<H, N> Elemeld<H, N> where
                     // Initialization events
                     io::NetEvent::Connect(cluster) => {
                         self.cluster.merge(cluster);
-                        self.net.send_to_all(&[io::NetEvent::Cluster(self.cluster.clone())]);
+                        self.net.send_to(&[io::NetEvent::Cluster(self.cluster.clone())], &addr);
                         self.state = State::Connected;
                     },
                     io::NetEvent::Cluster(cluster) => {
@@ -75,7 +85,7 @@ impl<H, N> Elemeld<H, N> where
         match self.state {
             State::Connecting => {
                 self.net.send_to_all(&[io::NetEvent::Connect(self.cluster.clone())]);
-                self.state = State::Ready;
+                self.state = State::Waiting;
             },
             _ => ()
         }

@@ -71,6 +71,10 @@ impl Cluster {
         } else { None }
     }
 
+    pub fn focused_screen(&self) -> &Screen {
+        &self.screens[self.focus.screen as usize]
+    }
+    
     fn locally_focused(&self) -> bool {
         self.focus.screen == self.local_screen
     }
@@ -226,7 +230,7 @@ impl Cluster {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
-struct Screen {
+pub struct Screen {
     size: Dimensions,
     edges: Edges,
     addrs: Vec<Addr>,
@@ -258,6 +262,10 @@ impl Screen {
                 left: None
             }
         }
+    }
+
+    pub fn default_route(&self) -> &net::SocketAddr {
+        &self.addrs[0].0
     }
 }
 
