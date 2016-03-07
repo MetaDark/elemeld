@@ -35,9 +35,6 @@ pub enum NetEvent {
     Key(KeyEvent),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug)]
-pub enum Button { Left, Right, Middle }
-
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PositionEvent {
     pub x: i32,
@@ -52,7 +49,7 @@ pub struct MotionEvent {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ButtonEvent {
-    pub button: Button,
+    pub button: u32,
     pub state: bool,
 }
 

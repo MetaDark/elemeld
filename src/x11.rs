@@ -108,18 +108,8 @@ impl X11Interface {
     }
 
     fn recv_button_event(&self, event: xlib::XButtonEvent, state: bool) -> Option<io::HostEvent> {
-        let button = match event.button {
-            xlib::Button1 => io::Button::Left,
-            xlib::Button2 => io::Button::Middle,
-            xlib::Button3 => io::Button::Right,
-            button => {
-                println!("Unexpected button press: {}", button);
-                return None
-            },
-        };
-
         Some(io::HostEvent::Button(io::ButtonEvent {
-            button: button,
+            button: event.button,
             state: state,
         }))
     }
@@ -150,14 +140,8 @@ impl X11Interface {
     }
 
     fn send_button_event(&self, event: io::ButtonEvent) {
-        let button = match event.button {
-            io::Button::Left => xlib::Button1,
-            io::Button::Middle => xlib::Button2,
-            io::Button::Right => xlib::Button3,
-        };
-
         unsafe {
-            (self.xtest.XTestFakeButtonEvent)(self.display, button, event.state as i32, xlib::CurrentTime);
+            (self.xtest.XTestFakeButtonEvent)(self.display, event.button, event.state as i32, xlib::CurrentTime);
             (self.xlib.XFlush)(self.display);
         };
     }
