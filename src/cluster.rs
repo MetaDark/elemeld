@@ -16,7 +16,7 @@ pub struct Cluster {
 
 #[derive(Clone, Copy, Serialize, Deserialize, Debug)]
 pub struct Focus {
-    screen: Index,
+    index: Index,
     pos: Dimensions,
 }
 
@@ -26,7 +26,7 @@ impl Cluster {
             screens: vec![Screen::new(width, height)],
             local_screen: 0,
             focus: Focus {
-                screen: 0,
+                index: 0,
                 pos: Dimensions { x: x , y: y },
             },
         }
@@ -39,7 +39,7 @@ impl Cluster {
             Some(io::HostEvent::Motion(event)) =>
                 if event.dx != 0 || event.dy != 0 {
                     let focus = Focus {
-                        screen: self.focus.screen,
+                        index: self.focus.index,
                         pos: Dimensions {
                             x: self.focus.pos.x + event.dx,
                             y: self.focus.pos.y + event.dy,
@@ -72,11 +72,11 @@ impl Cluster {
     }
 
     pub fn focused_screen(&self) -> &Screen {
-        &self.screens[self.focus.screen as usize]
+        &self.screens[self.focus.index as usize]
     }
     
     fn locally_focused(&self) -> bool {
-        self.focus.screen == self.local_screen
+        self.focus.index == self.local_screen
     }
 
     fn reset_local_screen(&mut self) {
@@ -124,50 +124,112 @@ impl Cluster {
 
     /*
      * Walk through the screens untill the x and y are contained within a screen
+     * TODO: Use macros to avoid the insane amount of repetition
      */
     fn normalize_focus(&self, focus: Focus) -> Focus {
-        let (screen, x, y) = (focus.screen, focus.pos.x, focus.pos.y);
-        let (screen, x) = self.normalize_x(screen, x);
-        let (screen, y) = self.normalize_y(screen, y);
-        
-        Focus {
-            screen: screen,
-            pos: Dimensions { x: x, y: y },
-        }
+        self.normalize_y(self.normalize_x(focus))
     }
 
-    fn normalize_x(&self, focus: Index, x: i32) -> (Index, i32) {
-        let screen = &self.screens[focus as usize];
-        if x < 20 {
+    fn normalize_x(&self, focus: Focus) -> Focus {
+        let screen = &self.screens[focus.index as usize];
+        if focus.pos.x <= 0 {
             match screen.edges.left {
-                Some(focus) => self.normalize_x(focus, x + self.screens[focus as usize].size.x - 40),
-                None => (focus, 0),
+                Some(index) => {
+                    let new_screen = &self.screens[index as usize];
+                    return self.normalize_x(Focus {
+                        index: index,
+                        pos: Dimensions {
+                            x: focus.pos.x + new_screen.size.x - 2,
+                            y: focus.pos.y * new_screen.size.y / screen.size.y,
+                        }
+                    })
+                },
+                None => if focus.pos.x < 0 {
+                    return Focus {
+                        index: focus.index,
+                        pos: Dimensions {
+                            x: 0,
+                            y: focus.pos.y,
+                        }
+                    }
+                },
             }
-        } else if x >= screen.size.x - 20 {
+        } else if focus.pos.x >= screen.size.x - 1 {
             match screen.edges.right {
-                Some(focus) => self.normalize_x(focus, x - screen.size.x + 40),
-                None => (focus, screen.size.x - 1),
+                Some(index) => {
+                    let new_screen = &self.screens[index as usize];
+                    return self.normalize_x(Focus {
+                        index: index,
+                        pos: Dimensions {
+                            x: focus.pos.x - screen.size.x + 2,
+                            y: focus.pos.y * new_screen.size.y / screen.size.y,
+                        }
+                    })
+                },
+                None => if focus.pos.x > screen.size.x - 1 {
+                    return Focus {
+                        index: focus.index,
+                        pos: Dimensions {
+                            x: screen.size.x - 1,
+                            y: focus.pos.y,
+                        }
+                    }
+                },
             }
-        } else {
-            (focus, x)
         }
+            
+        focus
     }
 
-    fn normalize_y(&self, focus: Index, y: i32) -> (Index, i32) {
-        let screen = &self.screens[focus as usize];
-        if y < 20 {
+    fn normalize_y(&self, focus: Focus) -> Focus {
+        let screen = &self.screens[focus.index as usize];
+        if focus.pos.y <= 0 {
             match screen.edges.top {
-                Some(focus) => self.normalize_y(focus, y + self.screens[focus as usize].size.y - 40),
-                None => (focus, 0),
+                Some(index) => {
+                    let new_screen = &self.screens[index as usize];
+                    return self.normalize_y(Focus {
+                        index: index,
+                        pos: Dimensions {
+                            x: focus.pos.x * new_screen.size.y / screen.size.x,
+                            y: focus.pos.y + new_screen.size.y - 2,
+                        }
+                    })
+                },
+                None => if focus.pos.y < 0 {
+                    return Focus {
+                        index: focus.index,
+                        pos: Dimensions {
+                            x: focus.pos.x,
+                            y: 0,
+                        }
+                    }
+                },
             }
-        } else if y >= screen.size.y - 20 {
+        } else if focus.pos.y >= screen.size.y - 1 {
             match screen.edges.bottom {
-                Some(focus) => self.normalize_y(focus, y - screen.size.y + 40),
-                None => (focus, screen.size.y - 1),
+                Some(index) => {
+                    let new_screen = &self.screens[index as usize];
+                    return self.normalize_y(Focus {
+                        index: index,
+                        pos: Dimensions {
+                            x: focus.pos.x * new_screen.size.y / screen.size.x,
+                            y: focus.pos.y - screen.size.y + 2,
+                        }
+                    })
+                },
+                None => if focus.pos.y > screen.size.y - 1 {
+                    return Focus {
+                        index: focus.index,
+                        pos: Dimensions {
+                            x: focus.pos.x,
+                            y: screen.size.y - 1,
+                        }
+                    }
+                },
             }
-        } else {
-            (focus, y)
         }
+            
+        focus
     }
 
     /**
