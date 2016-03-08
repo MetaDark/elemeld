@@ -333,7 +333,7 @@ impl serde::Serialize for Addr {
     fn serialize<S>(&self, serializer: &mut S) -> Result<(), S::Error>
         where S: serde::Serializer
     {
-        serializer.visit_str(&format!("{}", self.0))
+        serializer.serialize_str(&format!("{}", self.0))
     }
 }
 
@@ -350,12 +350,12 @@ impl serde::Deserialize for Addr {
             {
                 match val.parse::<net::SocketAddr>() {
                     Ok(addr) => Ok(Addr(addr)),
-                    Err(_) => Err(serde::de::Error::syntax("expected socket address")),
+                    Err(_) => Err(serde::de::Error::custom("expected socket address")),
                 }
             }
         }
 
-        deserializer.visit(SocketAddrVisitor)
+        deserializer.deserialize(SocketAddrVisitor)
     }
 }
 
