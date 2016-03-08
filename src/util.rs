@@ -1,14 +1,25 @@
 use nix;
 use nix::errno::Errno;
+use nix::unistd::{gethostname};
 use nix::sys::socket::{Ipv4Addr, Ipv6Addr, sockaddr_in, sockaddr_in6};
 
-use std::{net, ptr};
-use libc::{getifaddrs, freeifaddrs, AF_INET, AF_INET6};
+use std::{mem, ptr, net};
+use libc::{strlen, getifaddrs, freeifaddrs, AF_INET, AF_INET6};
 
-/*
- * Obtain a list of ip addresses for each interface
- */
-pub fn my_ips() -> Result<Vec<net::IpAddr>, nix::Error> {
+/// Obtain the host's name
+pub fn get_host_name() -> Result<String, nix::Error> {
+    let mut buf = [0; 255];
+    match gethostname(&mut buf) {
+        Ok(_) => {
+            let len = unsafe { strlen(mem::transmute(&buf as *const u8)) };
+            Ok(String::from_utf8_lossy(&buf[..len]).into_owned())
+        },
+        Err(err) => Err(err),
+    }
+}
+
+/// Obtain all of the host's IP addresses
+pub fn get_host_ips() -> Result<Vec<net::IpAddr>, nix::Error> {
     let mut addrs = Vec::new();
 
     unsafe {

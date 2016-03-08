@@ -81,7 +81,7 @@ impl Cluster {
     }
 
     fn reset_local_screen(&mut self) {
-        for ip in util::my_ips().unwrap() {
+        for ip in util::get_host_ips().unwrap() {
             for (i, screen) in self.screens.iter().enumerate() {
                 for addr in &screen.addrs {
                     if addr.0.ip() == ip {
@@ -123,10 +123,8 @@ impl Cluster {
         }
     }
 
-    /*
-     * Walk through the screens untill the x and y are contained within a screen
-     * TODO: Use macros to avoid the insane amount of repetition
-     */
+    /// Walk through the screens untill the x and y are contained within a screen
+    /// TODO: Use macros to avoid the insane amount of repetition
     fn normalize_focus(&self, focus: Focus) -> Focus {
         self.normalize_y(self.normalize_x(focus))
     }
@@ -233,9 +231,7 @@ impl Cluster {
         focus
     }
 
-    /**
-     * Add a new screen to the far right of the cluster
-     */
+    /// Add a new screen to the far right of the cluster
     fn add(&mut self, mut new_screen: Screen) {
         let new_index = self.screens.len() as Index;
         let mut index = 0 as Index;
@@ -255,9 +251,7 @@ impl Cluster {
         self.screens.push(new_screen);
     }
 
-    /**
-     * Attempt to merge two clusters together
-     */
+    /// Attempt to merge two clusters together
     pub fn merge(&mut self, other: Self) {
         'outer: for other_screen in other.screens {
             for other_addr in &other_screen.addrs {
@@ -276,9 +270,7 @@ impl Cluster {
         }
     }
 
-    /**
-     * Replace an existing cluster with a new cluster
-     */
+    /// Replace an existing cluster with a new cluster
     pub fn replace<H>(&mut self, host: &H, mut other: Self) where
         H: io::HostInterface
     {
@@ -294,6 +286,7 @@ impl Cluster {
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Screen {
+    name: String,
     size: Dimensions,
     edges: Edges,
     addrs: Vec<Addr>,
@@ -303,7 +296,8 @@ impl Screen {
     pub fn new(width: i32, height: i32) -> Self {
         let port = 8080; // FIXME: Get from config
         Screen {
-            addrs: util::my_ips().unwrap().into_iter()
+            name: util::get_host_name().unwrap(),
+            addrs: util::get_host_ips().unwrap().into_iter()
                 .filter_map(|addr| match addr {
                     net::IpAddr::V4(addr) =>
                         if !addr.is_loopback() {

@@ -3,8 +3,7 @@
 #![feature(custom_derive, plugin)]
 #![plugin(serde_macros)]
 
-// Used for getifaddrs
-#![feature(libc)]
+// Used for util
 extern crate libc;
 extern crate nix;
 
