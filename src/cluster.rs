@@ -189,7 +189,7 @@ impl Cluster {
                     return self.normalize_y(Focus {
                         index: index,
                         pos: Dimensions {
-                            x: focus.pos.x * new_screen.size.y / screen.size.x,
+                            x: focus.pos.x * new_screen.size.x / screen.size.x,
                             y: focus.pos.y + new_screen.size.y - 2,
                         }
                     })
@@ -211,7 +211,7 @@ impl Cluster {
                     return self.normalize_y(Focus {
                         index: index,
                         pos: Dimensions {
-                            x: focus.pos.x * new_screen.size.y / screen.size.x,
+                            x: focus.pos.x * new_screen.size.x / screen.size.x,
                             y: focus.pos.y - screen.size.y + 2,
                         }
                     })
