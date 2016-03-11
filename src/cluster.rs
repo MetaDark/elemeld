@@ -22,8 +22,28 @@ pub struct Focus {
 
 impl Cluster {
     pub fn new(width: i32, height: i32, x: i32, y: i32) -> Self {
+        use std::fs::File;
+        use std::io::Read;
+        use serde_json;
+
+        // This is probably weird place to load a file from
+        let app_dir = util::user_app_dir("elemeld").unwrap();
+        let screens = match File::open(app_dir.join("screens.json")) {
+            Ok(file) => match serde_json::from_reader(file) {
+                Ok(screens) => Some(screens),
+                Err(err) => {
+                    println!("Failed to parse screens.json: {}", err);
+                    None
+                },
+            },
+            Err(_) => None,
+        };
+        
         Cluster {
-            screens: vec![Screen::new(width, height)],
+            screens: match screens {
+                Some(screens) => screens,
+                None => vec![Screen::new(width, height)],
+            },
             local_screen: 0,
             focus: Focus {
                 index: 0,

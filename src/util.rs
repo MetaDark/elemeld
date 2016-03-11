@@ -3,8 +3,9 @@ use nix::errno::Errno;
 use nix::unistd::{gethostname};
 use nix::sys::socket::{Ipv4Addr, Ipv6Addr, sockaddr_in, sockaddr_in6};
 
-use std::{mem, ptr, net};
+use std::{mem, ptr, net, env};
 use libc::{strlen, getifaddrs, freeifaddrs, AF_INET, AF_INET6};
+use std::path::PathBuf;
 
 /// Obtain the host's name
 pub fn get_host_name() -> Result<String, nix::Error> {
@@ -50,4 +51,20 @@ pub fn get_host_ips() -> Result<Vec<net::IpAddr>, nix::Error> {
     };
 
     Ok(addrs)
+}
+
+// Obtain the directory for storing application data
+pub fn user_app_dir(name: &str) -> Option<PathBuf> {
+    match env::home_dir() {
+        Some(base) => Some(base.join(".config").join(name)),
+        None => None,
+    }
+
+    // I think this is what is needed for other
+    // OSes but I can't test them right now:
+    //
+    // Windows: %APPDATA%\<name>
+    // Mac: ~/Library/Preferences/<name> or
+    //      ~/Library/Application Support/<name>
+    //
 }
