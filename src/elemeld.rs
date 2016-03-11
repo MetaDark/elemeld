@@ -117,9 +117,14 @@ impl<'a> mio::Handler for Elemeld<'a> {
         match token {
             HOST_EVENT => {
                 if events.is_readable() {
-                    match self.host.recv_event() {
-                        Some(event) => self.host_event(event),
-                        None => (),
+                    // A single mio event trigger may correspond to
+                    // many host events, so process all host events
+                    // Be careful in host.recv_event so this doesn't infinite loop
+                    loop {
+                        match self.host.recv_event() {
+                            Some(event) => self.host_event(event),
+                            None => break,
+                        }
                     }
                 }
             },
