@@ -239,7 +239,7 @@ impl HostInterface for X11Interface {
             xlib::KeyRelease => self.recv_key_event(From::from(event), false),
             xlib::MappingNotify => None,
             event => {
-                println!("Unexpected X11 event: {}", event);
+                error!("Unexpected X11 event: {}", event);
                 None
             },
         }

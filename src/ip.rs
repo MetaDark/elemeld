@@ -37,14 +37,14 @@ impl<'a> NetInterface for IpInterface<'a> {
     fn send_to(&self, events: &[io::NetEvent], addr: &net::SocketAddr) -> Option<usize> {
         let id = self.out_packets.get();
         let msg = serde_json::to_string(&(id, events)).unwrap();
-        println!("=> {} {}", addr, msg);
+        debug!("=> {} {}", addr, msg);
         match self.socket.send_to(msg.as_bytes(), &addr).unwrap() {
             Some(size) => {
                 self.out_packets.set(id + 1);
                 Some(size)
             },
             None => {
-                println!("Failed to send: {}", msg);
+                error!("Failed to send: {}", msg);
                 None
             },
         }
@@ -63,15 +63,15 @@ impl<'a> NetInterface for IpInterface<'a> {
         match self.socket.recv_from(&mut buf).unwrap() {
             Some((len, addr)) => {
                 let msg = str::from_utf8(&buf[..len]).unwrap();
-                println!("<= {} {}", addr, msg);
+                debug!("<= {} {}", addr, msg);
                 
                 let (id, events): (usize, Vec<io::NetEvent>) = serde_json::from_str(msg).unwrap();
                 let expected_id = self.in_packets.get();
                 if id < expected_id {
-                    println!("^ out of sync packet");
+                    warn!("^ out of sync packet");
                 } else {
                     if id > expected_id {
-                        println!("^ lost {} packets", id - expected_id)
+                        warn!("^ lost {} packets", id - expected_id)
                     }
 
                     self.in_packets.set(id + 1);

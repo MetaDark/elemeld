@@ -9,13 +9,18 @@ extern crate nix;
 
 // Hacky work around for Xfixes
 extern crate dylib;
-#[macro_use] mod link;
+#[macro_use]
+mod link;
 mod xfixes;
 
 extern crate mio;
 extern crate serde;
 extern crate serde_json;
 extern crate x11_dl;
+
+#[macro_use]
+extern crate log;
+extern crate env_logger;
 
 mod elemeld;
 mod cluster;
@@ -28,6 +33,8 @@ use elemeld::{Elemeld, Config};
 use std::net;
 
 fn main() {
+    env_logger::init().unwrap();
+
     let config = Config {
         server_addr: mio::IpAddr::V4(net::Ipv4Addr::new(0, 0, 0, 0)),
         multicast_addr: mio::IpAddr::V4(net::Ipv4Addr::new(239, 255, 80, 80)),
