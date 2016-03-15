@@ -32,12 +32,12 @@ impl Cluster {
             Ok(file) => match serde_json::from_reader(file) {
                 Ok(screens) => Some(screens),
                 Err(err) => {
-                    error!("Failed to parse screens.json: {}", err);
+                    warn!("Failed to parse screens.json: {}", err);
                     None
                 },
             },
             Err(err) => {
-                error!("Failed to open screens.json {}", err);
+                warn!("Failed to open screens.json {}", err);
                 None
             },
         };
