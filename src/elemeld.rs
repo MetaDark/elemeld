@@ -1,13 +1,15 @@
-use io::{self, HostInterface, NetInterface};
+use io::*;
 use cluster::Cluster;
 use x11::X11Interface;
 use ip::IpInterface;
 
-use mio;
-use std::net;
+use mio::*;
 
-const HOST_EVENT: mio::Token = mio::Token(0);
-const NET_EVENT: mio::Token = mio::Token(1);
+use std::io;
+use std::net::SocketAddr;
+
+const HOST_EVENT: Token = Token(0);
+const NET_EVENT: Token = Token(1);
 
 pub struct Elemeld<'a> {
     config: &'a Config,
@@ -18,8 +20,8 @@ pub struct Elemeld<'a> {
 }
 
 pub struct Config {
-    pub server_addr: mio::IpAddr,
-    pub multicast_addr: mio::IpAddr,
+    pub server_addr: IpAddr,
+    pub multicast_addr: IpAddr,
     pub port: u16
 }
 
@@ -31,13 +33,13 @@ enum State {
 }
 
 impl<'a> Elemeld<'a> {
-    pub fn new(event_loop: &mut mio::EventLoop<Self>, config: &'a Config) -> Self {
+    pub fn new(event_loop: &mut EventLoop<Self>, config: &'a Config) -> io::Result<Self> {
         // Setup host interface
         let host = X11Interface::open();
-        event_loop.register(&host,
-                            HOST_EVENT,
-                            mio::EventSet::readable(),
-                            mio::PollOpt::level()).unwrap();
+        try!(event_loop.register(&host,
+                                 HOST_EVENT,
+                                 EventSet::readable(),
+                                 PollOpt::level()));
 
         // Setup cluster
         let (width, height) = host.screen_size();
@@ -45,34 +47,43 @@ impl<'a> Elemeld<'a> {
         let cluster = Cluster::new(width, height, x, y);
 
         // Setup net interface
-        let net = IpInterface::open(config);
-        event_loop.register(&net,
-                            NET_EVENT,
-                            mio::EventSet::readable() |
-                            mio::EventSet::writable(),
-                            mio::PollOpt::oneshot()).unwrap();
+        let net = try!(IpInterface::open(config));
+        try!(event_loop.register(&net,
+                                 NET_EVENT,
+                                 EventSet::readable() |
+                                 EventSet::writable(),
+                                 PollOpt::oneshot()));
 
-        Elemeld {
+        Ok(Elemeld {
             config: config,
             cluster: cluster,
             host: host,
             net: net,
             state: State::Connecting,
-        }
+        })
     }
 
-    pub fn host_event(&mut self, event: io::HostEvent) {
+    pub fn host_event(&mut self, event: HostEvent) {
         match self.state {
             State::Connected => match self.cluster.process_host_event(&self.host, event) {
                 Some(event) => match event {
                     // Global events
-                    io::NetEvent::Focus(focus) => {
-                        self.net.send_to_all(&[event]);
+                    NetEvent::Focus(focus) => {
+                        match self.net.send_to_all(NetEvent::Focus(focus)) {
+                            Err(e) => {
+                                error!("Failed to send event to cluster: {}", e);
+                                self.state = State::Waiting;
+                            }
+                            _ => (),
+                        };
                     },
                     // Focused events
                     event => {
                         let addr = self.cluster.focused_screen().default_route();
-                        self.net.send_to(&[event], addr);
+                        match self.net.send_to(event, addr) {
+                            Err(e) => error!("Failed to send event to {}: {}", addr, e),
+                            _ => (),
+                        };
                     },
                 },
                 None => (),
@@ -81,20 +92,22 @@ impl<'a> Elemeld<'a> {
         }
     }
 
-    pub fn net_event(&mut self, event: io::NetEvent, addr: net::SocketAddr) {
+    pub fn net_event(&mut self, event: NetEvent, addr: &SocketAddr) {
         match event {
             // Initialization events
-            io::NetEvent::Connect(cluster) => {
+            NetEvent::Connect(cluster) => {
                 self.cluster.merge(cluster);
-                self.net.send_to(&[io::NetEvent::Cluster(self.cluster.clone())], &addr);
-                self.state = State::Connected;
+                match self.net.send_to(NetEvent::Cluster(self.cluster.clone()), addr) {
+                    Ok(_) => self.state = State::Connected,
+                    Err(err) => error!("Failed to connect: {}", err),
+                };
             },
-            io::NetEvent::Cluster(cluster) => {
+            NetEvent::Cluster(cluster) => {
                 self.cluster.replace(&self.host, cluster);
                 self.state = State::Connected;
             },
             // Global events
-            io::NetEvent::Focus(focus) => {
+            NetEvent::Focus(focus) => {
                 self.cluster.refocus(&self.host, focus);
             },
             // Focued events
@@ -106,13 +119,13 @@ impl<'a> Elemeld<'a> {
     }
 }
 
-impl<'a> mio::Handler for Elemeld<'a> {
+impl<'a> Handler for Elemeld<'a> {
     type Timeout = ();
     type Message = ();
 
     fn ready(&mut self,
-             event_loop: &mut mio::EventLoop<Self>,
-             token: mio::Token, events: mio::EventSet)
+             event_loop: &mut EventLoop<Self>,
+             token: Token, events: EventSet)
     {
         match token {
             HOST_EVENT => {
@@ -131,22 +144,25 @@ impl<'a> mio::Handler for Elemeld<'a> {
             NET_EVENT => {
                 if events.is_readable() {
                     match self.net.recv_from() {
-                        Some((events, addr)) => for event in events {
-                            self.net_event(event, addr);
-                        },
-                        None => (),
+                        Ok(Some((event, addr))) => self.net_event(event, &addr),
+                        Ok(None) => (),
+                        Err(err) => error!("Failed to receive event: {}", err),
                     }
                 }
 
                 if events.is_writable() {
                     match self.state {
                         State::Connecting => {
-                            self.net.send_to_all(&[io::NetEvent::Connect(self.cluster.clone())]);
+                            match self.net.send_to_all(NetEvent::Connect(self.cluster.clone())) {
+                                Err(err) => error!("Failed to connect: {}", err),
+                                _ => (),
+                            };
+
                             self.state = State::Waiting;
                             event_loop.reregister(&self.net,
                                                   NET_EVENT,
-                                                  mio::EventSet::readable(),
-                                                  mio::PollOpt::level()).unwrap();
+                                                  EventSet::readable(),
+                                                  PollOpt::level()).unwrap();
                         },
                         _ => ()
                     }

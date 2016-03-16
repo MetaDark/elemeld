@@ -1,9 +1,8 @@
-use io;
-use elemeld::Config;
+use io::*;
 use util;
 
 use serde;
-use std::net;
+use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6, IpAddr};
 
 pub type Index = u8;
 
@@ -23,7 +22,6 @@ pub struct Focus {
 impl Cluster {
     pub fn new(width: i32, height: i32, x: i32, y: i32) -> Self {
         use std::fs::File;
-        use std::io::Read;
         use serde_json;
 
         // This is probably weird place to load a file from
@@ -55,11 +53,11 @@ impl Cluster {
         }
     }
     
-    pub fn process_host_event<H>(&mut self, host: &H, event: io::HostEvent) -> Option<io::NetEvent>
-        where H: io::HostInterface
+    pub fn process_host_event<H>(&mut self, host: &H, event: HostEvent) -> Option<NetEvent>
+        where H: HostInterface
     {
         match event {
-            io::HostEvent::Motion(event) => {
+            HostEvent::Motion(event) => {
                 if event.dx != 0 || event.dy != 0 {
                     let focus = Focus {
                         index: self.focus.index,
@@ -70,14 +68,14 @@ impl Cluster {
                     };
                     
                     self.refocus(host, focus);
-                    Some(io::NetEvent::Focus(focus))
+                    Some(NetEvent::Focus(focus))
                 } else { None }
             },
             event => {
                 if !self.locally_focused() {
                     match event {
-                        io::HostEvent::Button(event) => Some(io::NetEvent::Button(event)),
-                        io::HostEvent::Key(event) => Some(io::NetEvent::Key(event)),
+                        HostEvent::Button(event) => Some(NetEvent::Button(event)),
+                        HostEvent::Key(event) => Some(NetEvent::Key(event)),
                         _ => None,
                     }
                 } else { None }
@@ -85,11 +83,11 @@ impl Cluster {
         }
     }
 
-    pub fn process_net_event(&mut self, event: io::NetEvent) -> Option<io::HostEvent> {
+    pub fn process_net_event(&mut self, event: NetEvent) -> Option<HostEvent> {
         if self.locally_focused() {
             match event {
-                io::NetEvent::Button(event) => Some(io::HostEvent::Button(event)),
-                io::NetEvent::Key(event) => Some(io::HostEvent::Key(event)),
+                NetEvent::Button(event) => Some(HostEvent::Button(event)),
+                NetEvent::Key(event) => Some(HostEvent::Key(event)),
                 _ => None,
             }
         } else { None }
@@ -119,14 +117,14 @@ impl Cluster {
     }
 
     pub fn refocus<H>(&mut self, host: &H, focus: Focus) where
-        H: io::HostInterface
+        H: HostInterface
     {
         let was_focused = self.locally_focused();
         self.private_refocus(host, focus, was_focused);
     }
     
     fn private_refocus<H>(&mut self, host: &H, focus: Focus, was_focused: bool) where
-        H: io::HostInterface
+        H: HostInterface
     {
         self.focus = self.normalize_focus(focus);
         if self.locally_focused() {
@@ -135,7 +133,7 @@ impl Cluster {
                 host.ungrab_keyboard();
             }
             
-            host.send_event(io::HostEvent::Position(io::PositionEvent {
+            host.send_event(HostEvent::Position(PositionEvent {
                 x: self.focus.pos.x, y: self.focus.pos.y,
             }));
         } else {
@@ -295,7 +293,7 @@ impl Cluster {
 
     /// Replace an existing cluster with a new cluster
     pub fn replace<H>(&mut self, host: &H, mut other: Self) where
-        H: io::HostInterface
+        H: HostInterface
     {
         other.reset_local_screen();
         
@@ -322,13 +320,13 @@ impl Screen {
             name: util::get_host_name().unwrap(),
             addrs: util::get_host_ips().unwrap().into_iter()
                 .filter_map(|addr| match addr {
-                    net::IpAddr::V4(addr) =>
+                    IpAddr::V4(addr) =>
                         if !addr.is_loopback() {
-                            Some(net::SocketAddr::V4(net::SocketAddrV4::new(addr, port)))
+                            Some(SocketAddr::V4(SocketAddrV4::new(addr, port)))
                         } else { None },
-                    net::IpAddr::V6(addr) =>
+                    IpAddr::V6(addr) =>
                         if !addr.is_loopback() {
-                            Some(net::SocketAddr::V6(net::SocketAddrV6::new(addr, port, 0, 0)))
+                            Some(SocketAddr::V6(SocketAddrV6::new(addr, port, 0, 0)))
                         } else { None },
                 })
                 .map(|addr| Addr(addr))
@@ -344,13 +342,13 @@ impl Screen {
         }
     }
 
-    pub fn default_route(&self) -> &net::SocketAddr {
+    pub fn default_route(&self) -> &SocketAddr {
         &self.addrs[0].0
     }
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-struct Addr(net::SocketAddr);
+struct Addr(SocketAddr);
 
 impl serde::Serialize for Addr {
     fn serialize<S>(&self, serializer: &mut S) -> Result<(), S::Error>
@@ -371,7 +369,7 @@ impl serde::Deserialize for Addr {
             fn visit_str<E>(&mut self, val: &str) -> Result<Self::Value, E>
                 where E: serde::de::Error,
             {
-                match val.parse::<net::SocketAddr>() {
+                match val.parse::<SocketAddr>() {
                     Ok(addr) => Ok(Addr(addr)),
                     Err(_) => Err(serde::de::Error::custom("expected socket address")),
                 }

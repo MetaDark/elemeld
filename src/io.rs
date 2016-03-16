@@ -1,4 +1,6 @@
-use cluster;
+use cluster::{Cluster, Focus};
+
+use std::io;
 use std::net::SocketAddr;
 
 pub trait HostInterface {
@@ -13,9 +15,9 @@ pub trait HostInterface {
 }
 
 pub trait NetInterface {
-    fn send_to(&self, events: &[NetEvent], addr: &SocketAddr) -> Option<usize>;
-    fn send_to_all(&self, events: &[NetEvent]) -> Option<usize>;
-    fn recv_from(&self) -> Option<(Vec<NetEvent>, SocketAddr)>;
+    fn send_to(&self, event: NetEvent, addr: &SocketAddr) -> io::Result<Option<()>>;
+    fn send_to_all(&self, event: NetEvent) -> io::Result<Option<()>>;
+    fn recv_from(&self) -> io::Result<Option<(NetEvent, SocketAddr)>>;
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -28,9 +30,9 @@ pub enum HostEvent {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum NetEvent {
-    Connect(cluster::Cluster),
-    Cluster(cluster::Cluster),
-    Focus(cluster::Focus),
+    Connect(Cluster),
+    Cluster(Cluster),
+    Focus(Focus),
     Button(ButtonEvent),
     Key(KeyEvent),
 }

@@ -30,18 +30,19 @@ mod ip;
 mod util;
 
 use elemeld::{Elemeld, Config};
-use std::net;
+use mio::{IpAddr, EventLoop};
+use std::net::Ipv4Addr;
 
 fn main() {
     env_logger::init().unwrap();
 
     let config = Config {
-        server_addr: mio::IpAddr::V4(net::Ipv4Addr::new(0, 0, 0, 0)),
-        multicast_addr: mio::IpAddr::V4(net::Ipv4Addr::new(239, 255, 80, 80)),
+        server_addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
+        multicast_addr: IpAddr::V4(Ipv4Addr::new(239, 255, 80, 80)),
         port: 8080,
     };
 
-    let mut event_loop = mio::EventLoop::new().unwrap();
-    let mut elemeld = Elemeld::new(&mut event_loop, &config);
+    let mut event_loop = EventLoop::new().unwrap();
+    let mut elemeld = Elemeld::new(&mut event_loop, &config).unwrap();
     event_loop.run(&mut elemeld).unwrap();
 }

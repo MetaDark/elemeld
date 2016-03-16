@@ -1,85 +1,70 @@
-use io::{self, NetInterface};
+use io::*;
 use elemeld::Config;
 
-use mio;
+use mio::*;
+use mio::udp::UdpSocket;
 use serde_json;
 
-use std::{net, str};
-use std::cell::Cell;
+use std::io;
+use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 
 pub struct IpInterface<'a> {
     config: &'a Config,
-    socket: mio::udp::UdpSocket,
-    out_packets: Cell<usize>,
-    in_packets: Cell<usize>,
+    socket: udp::UdpSocket,
 }
 
 impl<'a> IpInterface<'a> {
-    pub fn open(config: &'a Config) -> Self {
-        let socket = mio::udp::UdpSocket::v4().unwrap();
-        socket.set_multicast_loop(false).unwrap();
-        socket.join_multicast(&config.multicast_addr).unwrap();
-        socket.bind(&match config.server_addr {
-            mio::IpAddr::V4(addr) => net::SocketAddr::V4((net::SocketAddrV4::new(addr, config.port))),
-            mio::IpAddr::V6(addr) => net::SocketAddr::V6((net::SocketAddrV6::new(addr, config.port, 0, 0))),
-        }).unwrap();
+    pub fn open(config: &'a Config) -> io::Result<Self> {
+        let socket = try!(UdpSocket::v4());
+        try!(socket.set_multicast_loop(false));
+        try!(socket.join_multicast(&config.multicast_addr));
+        try!(socket.bind(&match config.server_addr {
+            IpAddr::V4(addr) => SocketAddr::V4((SocketAddrV4::new(addr, config.port))),
+            IpAddr::V6(addr) => SocketAddr::V6((SocketAddrV6::new(addr, config.port, 0, 0))),
+        }));
 
-        IpInterface {
+        Ok(IpInterface {
             config: config,
             socket: socket,
-            out_packets: Cell::new(0),
-            in_packets: Cell::new(0),
-        }
+        })
     }
 }
 
 impl<'a> NetInterface for IpInterface<'a> {
-    fn send_to(&self, events: &[io::NetEvent], addr: &net::SocketAddr) -> Option<usize> {
-        let id = self.out_packets.get();
-        let msg = serde_json::to_string(&(id, events)).unwrap();
-        debug!("=> {} {}", addr, msg);
-        match self.socket.send_to(msg.as_bytes(), &addr).unwrap() {
-            Some(size) => {
-                self.out_packets.set(id + 1);
-                Some(size)
-            },
-            None => {
-                error!("Failed to send: {}", msg);
-                None
-            },
+    fn send_to(&self, event: NetEvent, addr: &SocketAddr) -> io::Result<Option<()>> {
+        debug!("=> {} <= {:#?}", addr, event);
+        let packet = serde_json::to_vec(&event).unwrap();
+        match self.socket.send_to(&packet, addr) {
+            Ok(Some(_)) => Ok(Some(())),
+            Ok(None) => Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "The OS socket buffer is probably full"
+            )),
+            Err(err) => Err(err),
         }
     }
 
-    fn send_to_all(&self, events: &[io::NetEvent]) -> Option<usize> {
+    fn send_to_all(&self, event: NetEvent) -> io::Result<Option<()>> {
         let addr = match self.config.multicast_addr {
-            mio::IpAddr::V4(addr) => net::SocketAddr::V4((net::SocketAddrV4::new(addr, self.config.port))),
-            mio::IpAddr::V6(addr) => net::SocketAddr::V6((net::SocketAddrV6::new(addr, self.config.port, 0, 0))),
+            IpAddr::V4(addr) => SocketAddr::V4((SocketAddrV4::new(addr, self.config.port))),
+            IpAddr::V6(addr) => SocketAddr::V6((SocketAddrV6::new(addr, self.config.port, 0, 0))),
         };
-        self.send_to(events, &addr)
+        
+        self.send_to(event, &addr)
     }
 
-    fn recv_from(&self) -> Option<(Vec<io::NetEvent>, net::SocketAddr)> {
+    fn recv_from(&self) -> io::Result<Option<(NetEvent, SocketAddr)>> {
         let mut buf = [0; 1024];
-        match self.socket.recv_from(&mut buf).unwrap() {
-            Some((len, addr)) => {
-                let msg = str::from_utf8(&buf[..len]).unwrap();
-                debug!("<= {} {}", addr, msg);
-                
-                let (id, events): (usize, Vec<io::NetEvent>) = serde_json::from_str(msg).unwrap();
-                let expected_id = self.in_packets.get();
-                if id < expected_id {
-                    warn!("^ out of sync packet");
-                } else {
-                    if id > expected_id {
-                        warn!("^ lost {} packets", id - expected_id)
-                    }
-
-                    self.in_packets.set(id + 1);
-                }
-
-                Some((events, addr))
+        match self.socket.recv_from(&mut buf) {
+            Ok(Some((len, addr))) => match serde_json::from_slice(&buf[..len]) {
+                Ok(event) => {
+                    debug!("<= {} => {:#?}", addr, event);
+                    Ok(Some((event, addr)))
+                },
+                Err(err) => Err(io::Error::new(io::ErrorKind::InvalidData, err)),
             },
-            None => None,
+            Ok(None) => Ok(None),
+            Err(err) => Err(err),
         }
     }
 }
@@ -88,16 +73,16 @@ impl<'a> NetInterface for IpInterface<'a> {
  * FIXME(Future):
  * Method delegation: https://github.com/rust-lang/rfcs/pull/1406
  */
-impl<'a> mio::Evented for IpInterface<'a> {
-    fn register(&self, selector: &mut mio::Selector, token: mio::Token, interest: mio::EventSet, opts: mio::PollOpt) -> ::std::io::Result<()> {
+impl<'a> Evented for IpInterface<'a> {
+    fn register(&self, selector: &mut Selector, token: Token, interest: EventSet, opts: PollOpt) -> io::Result<()> {
         self.socket.register(selector, token, interest, opts)
     }
 
-    fn reregister(&self, selector: &mut mio::Selector, token: mio::Token, interest: mio::EventSet, opts: mio::PollOpt) -> ::std::io::Result<()> {
+    fn reregister(&self, selector: &mut Selector, token: Token, interest: EventSet, opts: PollOpt) -> io::Result<()> {
         self.socket.reregister(selector, token, interest, opts)
     }
 
-    fn deregister(&self, selector: &mut mio::Selector) -> ::std::io::Result<()> {
+    fn deregister(&self, selector: &mut Selector) -> io::Result<()> {
         self.socket.deregister(selector)
     }
 }
