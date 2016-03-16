@@ -10,7 +10,7 @@ rustc-serialize = "*"
 serde_json = "*"
 bincode = "*"
 serde_macros = "*"
-x11-dl = "*"
+x11-dl = { git = "https://github.com/MetaDark/x11-rs.git" }
 dylib = "*"
 libc = "*"
 nix = "*"

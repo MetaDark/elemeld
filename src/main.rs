@@ -7,12 +7,6 @@
 extern crate libc;
 extern crate nix;
 
-// Hacky work around for Xfixes
-extern crate dylib;
-#[macro_use]
-mod link;
-mod xfixes;
-
 extern crate mio;
 extern crate serde;
 extern crate rustc_serialize;

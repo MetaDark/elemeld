@@ -6,7 +6,7 @@ use x11_dl::keysym::*;
 use x11_dl::xlib;
 use x11_dl::xinput2;
 use x11_dl::xtest;
-use xfixes;
+use x11_dl::xfixes;
 use mio::*;
 
 use std::{io, ptr, mem};

@@ -2,7 +2,7 @@
 name = "elemeld"
 version = "0.1.0"
 dependencies = [
- "bincode 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "bincode 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "docopt 0.6.78 (registry+https://github.com/rust-lang/crates.io-index)",
  "docopt_macros 0.6.81 (registry+https://github.com/rust-lang/crates.io-index)",
  "dylib 0.0.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -15,7 +15,7 @@ dependencies = [
  "serde 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_json 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_macros 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "x11-dl 2.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "x11-dl 2.4.0 (git+https://github.com/MetaDark/x11-rs.git)",
 ]
 
 [[package]]
@@ -33,7 +33,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "bincode"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "byteorder 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -339,8 +339,8 @@ dependencies = [
 
 [[package]]
 name = "x11-dl"
-version = "2.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+version = "2.4.0"
+source = "git+https://github.com/MetaDark/x11-rs.git#b582a8e605ef8281b4bca826b7403be137e78bd9"
 dependencies = [
  "dylib 0.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.8 (registry+https://github.com/rust-lang/crates.io-index)",
