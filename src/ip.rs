@@ -3,7 +3,7 @@ use elemeld::Config;
 
 use mio::*;
 use mio::udp::UdpSocket;
-use serde_json;
+use bincode::{serde as bincode_serde, SizeLimit};
 
 use std::io;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
@@ -32,8 +32,8 @@ impl<'a> IpInterface<'a> {
 
 impl<'a> NetInterface for IpInterface<'a> {
     fn send_to(&self, event: NetEvent, addr: &SocketAddr) -> io::Result<Option<()>> {
-        debug!("=> {} <= {:#?}", addr, event);
-        let packet = serde_json::to_vec(&event).unwrap();
+        let packet = bincode_serde::serialize(&event, SizeLimit::Bounded(1024)).unwrap();
+        debug!("=> {} <= ({} bytes) {:#?}", addr, packet.len(), event);
         match self.socket.send_to(&packet, addr) {
             Ok(Some(_)) => Ok(Some(())),
             Ok(None) => Err(io::Error::new(
@@ -56,12 +56,10 @@ impl<'a> NetInterface for IpInterface<'a> {
     fn recv_from(&self) -> io::Result<Option<(NetEvent, SocketAddr)>> {
         let mut buf = [0; 1024];
         match self.socket.recv_from(&mut buf) {
-            Ok(Some((len, addr))) => match serde_json::from_slice(&buf[..len]) {
-                Ok(event) => {
-                    debug!("<= {} => {:#?}", addr, event);
-                    Ok(Some((event, addr)))
-                },
-                Err(err) => Err(io::Error::new(io::ErrorKind::InvalidData, err)),
+            Ok(Some((len, addr))) => {
+                let event = bincode_serde::deserialize::<NetEvent>(&buf[..len]).unwrap();
+                debug!("<= {} => ({} bytes) {:#?}", addr, len, event);
+                Ok(Some((event, addr)))
             },
             Ok(None) => Ok(None),
             Err(err) => Err(err),

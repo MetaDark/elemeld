@@ -15,8 +15,9 @@ mod xfixes;
 
 extern crate mio;
 extern crate serde;
-extern crate serde_json;
 extern crate rustc_serialize;
+extern crate serde_json;
+extern crate bincode;
 extern crate x11_dl;
 
 #[macro_use]

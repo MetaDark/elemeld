@@ -376,7 +376,7 @@ impl serde::Deserialize for Addr {
             }
         }
 
-        deserializer.deserialize(SocketAddrVisitor)
+        deserializer.deserialize_string(SocketAddrVisitor)
     }
 }
 
