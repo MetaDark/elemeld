@@ -8,9 +8,10 @@ pub type Index = u8;
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Cluster {
-    screens: Vec<Screen>,
     local_screen: Index,
+    screens: Vec<Screen>,
     focus: Focus,
+    selections: Vec<Index>,
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize, Debug)]
@@ -41,15 +42,16 @@ impl Cluster {
         };
         
         Cluster {
+            local_screen: 0,
             screens: match screens {
                 Some(screens) => screens,
                 None => vec![Screen::new(width, height)],
             },
-            local_screen: 0,
             focus: Focus {
                 index: 0,
                 pos: Dimensions { x: x , y: y },
             },
+            selections: vec![0, 0],
         }
     }
     
@@ -70,6 +72,10 @@ impl Cluster {
                     self.refocus(host, focus);
                     Some(NetEvent::Focus(focus))
                 } else { None }
+            },
+            HostEvent::Selection(event) => {
+                println!("{:?}", event);
+                None
             },
             event => {
                 if !self.locally_focused() {

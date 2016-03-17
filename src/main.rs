@@ -1,5 +1,3 @@
-#![allow(dead_code, unused_variables, unused_imports)]
-
 #![feature(custom_derive, plugin)]
 #![plugin(serde_macros, docopt_macros)]
 
@@ -28,8 +26,6 @@ mod util;
 
 use elemeld::{Elemeld, Config};
 use mio::{IpAddr, EventLoop};
-// use docopt::Docopt;
-use std::net::Ipv4Addr;
 
 docopt!(Args derive Debug, "
 Usage:
@@ -62,6 +58,7 @@ fn main() {
 
     let mut event_loop = EventLoop::new().unwrap();
     let mut elemeld = Elemeld::new(&mut event_loop, &config).unwrap();
-    event_loop.run(&mut elemeld).unwrap();
 
+    info!("Starting event loop");
+    event_loop.run(&mut elemeld).unwrap();
 }

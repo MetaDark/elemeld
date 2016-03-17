@@ -12,7 +12,6 @@ const HOST_EVENT: Token = Token(0);
 const NET_EVENT: Token = Token(1);
 
 pub struct Elemeld<'a> {
-    config: &'a Config,
     cluster: Cluster,
     host: X11Interface,
     net: IpInterface<'a>,
@@ -34,19 +33,19 @@ enum State {
 
 impl<'a> Elemeld<'a> {
     pub fn new(event_loop: &mut EventLoop<Self>, config: &'a Config) -> io::Result<Self> {
-        // Setup host interface
+        // Initialize host interface
         let host = X11Interface::open();
         try!(event_loop.register(&host,
                                  HOST_EVENT,
                                  EventSet::readable(),
                                  PollOpt::level()));
 
-        // Setup cluster
+        // Initialize cluster
         let (width, height) = host.screen_size();
         let (x, y) = host.cursor_pos();
         let cluster = Cluster::new(width, height, x, y);
 
-        // Setup net interface
+        // Initialize net interface
         let net = try!(IpInterface::open(config));
         try!(event_loop.register(&net,
                                  NET_EVENT,
@@ -55,7 +54,6 @@ impl<'a> Elemeld<'a> {
                                  PollOpt::oneshot()));
 
         Ok(Elemeld {
-            config: config,
             cluster: cluster,
             host: host,
             net: net,

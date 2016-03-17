@@ -26,6 +26,7 @@ pub enum HostEvent {
     Motion(MotionEvent),
     Button(ButtonEvent),
     Key(KeyEvent),
+    Selection(Selection),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -59,4 +60,10 @@ pub struct ButtonEvent {
 pub struct KeyEvent {
     pub key: u64,
     pub state: bool,
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize, Debug)]
+pub enum Selection {
+    Primary,
+    Clipboard,
 }

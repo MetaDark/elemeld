@@ -2,7 +2,6 @@
 
 use io::*;
 
-use x11_dl::keysym::*;
 use x11_dl::xlib;
 use x11_dl::xinput2;
 use x11_dl::xtest;
@@ -11,26 +10,28 @@ use mio::*;
 
 use std::{io, ptr, mem};
 use std::cell::Cell;
+use std::ffi::CString;
 
 pub struct X11Interface {
     xlib: xlib::Xlib,
     xinput2: xinput2::XInput2,
     xtest: xtest::Xf86vmode,
     xfixes: xfixes::XFixes,
+    xfixes_event_base: i32,
+
     display: *mut xlib::Display,
     root: xlib::Window,
+    clipboard: xlib::Atom,
+
     last_pos: Cell<(i32, i32)>,
     cursor_grabbed: Cell<bool>,
 }
 
 impl X11Interface {
     pub fn open() -> Self {
-        // Connect to display
         let xlib = xlib::Xlib::open().unwrap();
-
-        // FIXME: Should I use XQueryExtension for these extensions?
-        let xinput2 = xinput2::XInput2::open().unwrap();
         let xtest = xtest::Xf86vmode::open().unwrap();
+        let xinput2 = xinput2::XInput2::open().unwrap();
         let xfixes = xfixes::XFixes::open().unwrap();
 
         let display = unsafe { (xlib.XOpenDisplay)(ptr::null()) };
@@ -38,22 +39,68 @@ impl X11Interface {
             panic!("Failed to open display");
         }
 
+        // Query XInput2
+        unsafe {
+            let mut major_opcode = mem::uninitialized();
+            let mut first_event = mem::uninitialized();
+            let mut first_error = mem::uninitialized();
+            if (xlib.XQueryExtension)(display,
+                CString::new("XInputExtension").unwrap().as_ptr(),
+                &mut major_opcode,
+                &mut first_event,
+                &mut first_error,
+            ) == xlib::False {
+                panic!("Failed to query XInputExtension");
+            };
+        }
+
+        // Query XFixes
+        let xfixes_event_base = unsafe {
+            let mut event_base: i32 = mem::uninitialized();
+            let mut error_base: i32 = mem::uninitialized();
+            if (xfixes.XFixesQueryExtension)(display,
+                &mut event_base,
+                &mut error_base,
+            ) == xlib::False {
+                panic!("Failed to query XFixes");
+            }
+
+            event_base
+        };
+
         let root = unsafe { (xlib.XDefaultRootWindow)(display) };
+        let clipboard = unsafe { (xlib.XInternAtom)(
+            display, CString::new("CLIPBOARD").unwrap().as_ptr(), 0
+        ) };
+
         let host = X11Interface {
             xlib: xlib,
-            xinput2: xinput2,
             xtest: xtest,
+            xinput2: xinput2,
             xfixes: xfixes,
+            xfixes_event_base: xfixes_event_base,
+
             display: display,
             root: root,
+            clipboard: clipboard,
+
             last_pos: Cell::new((0, 0)),
             cursor_grabbed: Cell::new(false),
         };
 
-        // Initialize last_pos for computing deltas
-        host.last_pos.set(host.cursor_pos());
+        host.init();
+        host
+    }
 
-        // Setup default events
+    fn init(&self) {
+        // Initialize last_pos for computing cursor deltas
+        self.last_pos.set(self.cursor_pos());
+
+        // Setup selection events
+        self.select_selection_input(self.root, xlib::XA_PRIMARY, xfixes::XFixesSetSelectionOwnerNotifyMask);
+        self.select_selection_input(self.root, self.clipboard, xfixes::XFixesSetSelectionOwnerNotifyMask);
+
+        // Setup raw motion events
         let mut mask = [0u8; (xinput2::XI_LASTEVENT as usize + 7) / 8];
         xinput2::XISetMask(&mut mask, xinput2::XI_RawMotion);
 
@@ -63,8 +110,7 @@ impl X11Interface {
             mask: &mut mask[0] as *mut u8,
         }];
 
-        host.xi_select_events(&mut events);
-        host
+        self.select_events(self.root, &mut events);
     }
 
     // xlib interface
@@ -80,10 +126,17 @@ impl X11Interface {
         }
     }
 
+    // xfixes
+    fn select_selection_input(&self, window: xlib::Window, atom: xlib::Atom, event_mask: u64) {
+        unsafe { (self.xfixes.XFixesSelectSelectionInput)(
+            self.display, window, atom, event_mask
+        ) };
+    }
+
     // xinput2
-    fn xi_select_events(&self, mask: &mut [xinput2::XIEventMask]) {
+    fn select_events(&self, window: xlib::Window, mask: &mut [xinput2::XIEventMask]) {
         unsafe { (self.xinput2.XISelectEvents)(
-            self.display, self.root,
+            self.display, window,
             &mut mask[0] as *mut xinput2::XIEventMask, mask.len() as i32
         ) };
     }
@@ -120,6 +173,25 @@ impl X11Interface {
             key: keysym,
             state: state,
         }))
+    }
+
+    fn recv_selection_event(&self, event: xfixes::XFixesSelectionNotifyEvent) -> Option<HostEvent> {
+        match event.subtype {
+            xfixes::XFixesSetSelectionOwnerNotify => {
+                if event.selection == xlib::XA_PRIMARY {
+                    Some(HostEvent::Selection(Selection::Primary))
+                } else if event.selection == self.clipboard {
+                    Some(HostEvent::Selection(Selection::Clipboard))
+                } else {
+                    warn!("Unexpected selection source: {}", event.selection);
+                    None
+                }
+            },
+            subtype => {
+                warn!("Unexpected XFixesSelection sub event: {}", subtype);
+                None
+            }
+        }
     }
 
     fn send_position_event(&self, event: PositionEvent) {
@@ -231,18 +303,27 @@ impl HostInterface for X11Interface {
         }
 
         let event = self.next_event();
-        match event.get_type() {
-            xlib::GenericEvent => self.recv_generic_event(From::from(event)),
-            xlib::ButtonPress => self.recv_button_event(From::from(event), true),
-            xlib::ButtonRelease => self.recv_button_event(From::from(event), false),
-            xlib::KeyPress => self.recv_key_event(From::from(event), true),
-            xlib::KeyRelease => self.recv_key_event(From::from(event), false),
-            xlib::MappingNotify => None,
-            event => {
-                warn!("Unexpected X11 event: {}", event);
-                None
-            },
-        }
+        let event_type = event.get_type();
+
+        // Standard events
+        match event_type {
+            xlib::GenericEvent => return self.recv_generic_event(From::from(event)),
+            xlib::ButtonPress => return self.recv_button_event(From::from(event), true),
+            xlib::ButtonRelease => return self.recv_button_event(From::from(event), false),
+            xlib::KeyPress => return self.recv_key_event(From::from(event), true),
+            xlib::KeyRelease => return self.recv_key_event(From::from(event), false),
+            xlib::MappingNotify => return None,
+            _ => (),
+        };
+
+        // XFixes selection events
+        match event_type - self.xfixes_event_base {
+            xfixes::XFixesSelectionNotify => return self.recv_selection_event(From::from(event)),
+            _ => (),
+        };
+
+        warn!("Unexpected X11 event: {}", event_type);
+        None
     }
 
     fn send_event(&self, event: HostEvent) {
@@ -251,6 +332,7 @@ impl HostInterface for X11Interface {
             HostEvent::Motion(event) => self.send_motion_event(event),
             HostEvent::Button(event) => self.send_button_event(event),
             HostEvent::Key(event) => self.send_key_event(event),
+            event => warn!("Unexpected host event: {:?}", event),
         }
     }
 }
