@@ -149,9 +149,15 @@
 
         var target = focus.target;
         if (target.connectClosest) {
-            target.connectClosest(this.screens.filter((screen) => {
-                return screen != target;
-            }));
+            let blarg = this.screens.filter((screen) => {
+                for (key in this.focuses) {
+                    if (screen == this.focuses[key].target) {
+                        return false;
+                    }
+                }
+                return true;
+            });
+            target.connectClosest(blarg);
         }
         focus.target.elem.classList.remove('dragging');
         delete this.focuses[e.id];
