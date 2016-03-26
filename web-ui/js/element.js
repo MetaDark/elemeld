@@ -66,6 +66,15 @@ var element = (function(window, document) {
       delete params.attributes;
     }
 
+    if (params.dataset) {
+      for (var attribute in params.dataset) {
+        if (params.dataset[attribute] !== undefined) {
+          elem.dataset[attribute] = params.dataset[attribute];
+        }
+      }
+      delete params.dataset;
+    }
+
     if (params.style) {
       for (var key in params.style) {
         var val = params.style[key];

@@ -1,47 +1,63 @@
 body {
-    margin: 0;
+    display: flex;
+    flex-direction: column;
+    position: absolute;
     width: 100%;
     height: 100%;
+    margin: 0;
     font-family: 'Lato', sans-serif;
 }
 
-.title {
+.header {
+    flex: 0;
     text-align: center;
     text-transform: capitalize;
     background-color: #2196f3;
-    border-bottom: 5px solid #1976d2;
     color: #ffffff;
     margin: 0;
     padding: 15px;
 }
 
 .canvas {
-    position: absolute;
-    width: 100%;
-    height: 100%;
+    flex: 1;
     overflow: hidden;
 }
 
-.screen {
-    box-sizing: border-box;
-    position: absolute;
-    background-color: #8BC34A;
-    box-shadow: 0px 0px 10px rgba(0,0,0,0.1);
-    border: 5px solid #689f38;
-    transition: transform 0.2s ease-out, opacity 0.2s ease-out, box-shadow 0.2s ease-out;
+.view {
+    position: relative;
+}
 
+.draggable {
+    cursor: default;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -khtml-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+
+.dragging {
+    cursor: move;
+}
+
+.screen {
     display: flex;
     justify-content: center;
     align-content: center;
     flex-direction: column;
+    position: absolute;
+    box-sizing: border-box;
+    background-color: #8BC34A;
+    transition: transform 0.2s ease-out, opacity 0.2s ease-out, box-shadow 0.2s ease-out;
+}
+
+.screen.dragging {
+    transform: scale(1.10);
+    box-shadow: 0px 0px 20px rgba(5,0,0,0.50);
+    opacity: 0.75;
 }
 
 .screen-name {
     text-align: center;
-}
-
-.drag {
-    transform: scale(1.10);
-    box-shadow: 0px 0px 20px rgba(5,0,0,0.50);
-    opacity: 0.75;
 }
