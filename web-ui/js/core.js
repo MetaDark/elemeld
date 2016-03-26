@@ -7,7 +7,9 @@
         });
 
         this.pos = {x: 0, y: 0};
-        this.screens = [];        
+        this.screens = [];
+        this.names = ['Main Laptop', 'Desktop', 'Secondary Laptop', 'Gallifrey', 'Kronos', 'Atlantis'];
+        this.nameIndex = 0;
         this.focuses = {};
         
         // Setup mouse events
@@ -63,15 +65,16 @@
         };
     };    
 
-    Canvas.prototype.addScreen = function(pos) {     
+    Canvas.prototype.addScreen = function(pos) {
         var id = this.screens.length;
         var screen = new Screen({
             id: id,
-            name: 'gallifrey',
+            name: this.names[this.nameIndex],
             pos: pos,
             size: {x: 160, y: 100},
         });
 
+        this.nameIndex = (this.nameIndex + 1) % this.names.length;
         screen.connectClosest(this.screens);
         this.screens.push(screen);
         this.view.appendChild(screen.elem);
