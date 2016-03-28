@@ -278,44 +278,22 @@
         this.setPos(pos);
     };
 
-    Screen.prototype.swap = function(dim, side) {
-        // console.log('swap:', dim, side);
-        // var other = this.edges[dim][side];
-
-        // // Swap edges
-        // var temp = this.edges;
-        // this.edges = other.edges;
-        // this.edges[1 - side] = other;
-        // other.edges = temp;
-        // other.edges[side] = this;
-
-        // // Reposition other screen
-        // var pos = other.pos;
-        // var offset = ((this.size[dim] + other.size[dim]) / 2 + gridPad);
-        // pos[dim] -= (2 * side - 1) * offset;
-        // other.setPos(pos);
-    };
-
     Screen.prototype.connectClosest = function(screens) {
         var closest = this.closest(screens);
         if (closest) this.connect(closest.screen);
     };
 
+    Screen.prototype.dragStart = function(e) {
+        this.edges = [[null, null], [null, null]];
+    };
+
     Screen.prototype.dragMove = function(e) {
         this.setPos(vectorAdd(this.pos, e.delta));
-
-        // Swap when this center meets the edge of another screen
-        this.pos.forEach((val, dim) => {
-            this.edges[dim].forEach((other, side) => {
-                if (other && val >= other.pos[dim] - (2 * side - 1) * other.size[dim] / 2) {
-                    this.swap(dim, side);
-                }
-            });
-        });
     };
 
     Screen.prototype.dragEnd = function(e) {
         this.connectClosest(e.source.getScreens());
+        console.log(this);
     };
 
     new Canvas(document.querySelector('.canvas'));
