@@ -35,6 +35,7 @@
                 return;
             }
 
+            // Ignore if identifier is already focused on an item
             if (this.focuses[e.id]) {
                 return;
             }
@@ -52,6 +53,13 @@
                 this.view.appendChild(target.elem);
             } else {
                 target = this;
+            }
+
+            // Prevent multiple identifiers from dragging a single target
+            for (var key in this.focuses) {
+                if (this.focuses[key].target == target) {
+                    return;
+                }
             }
 
             // Call target callback
@@ -159,7 +167,7 @@
     Canvas.prototype.getScreens = function() {
         return this.screens.filter((screen) => {
             // Ignore screens that have focuses on them
-            for (key in this.focuses) {
+            for (var key in this.focuses) {
                 if (screen == this.focuses[key].target) {
                     return false;
                 }
