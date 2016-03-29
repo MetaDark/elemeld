@@ -321,22 +321,20 @@
         }, null);
 
         // Determine which sides to connect together
+        var newEdges = [[null, null], [null, null]];
         var side = delta[dim] < 0 ? 0 : 1;
-        other.edges[dim][side] = this;
-        this.edges[dim][1 - side] = other;
+        newEdges[dim][1 - side] = other;
 
         // Walk around graph through adjacent dimensions to find neighbours
-        other.edges.filter((edgeDim, pathDim) => {
-            return pathDim != dim;
-        }).forEach((edgeDim, pathDim) => {
+        other.edges.forEach((edgeDim, pathDim) => {
+            if (pathDim == dim) return;
             edgeDim.forEach((screen, pathSide) => {
                 if (!screen) return;
                 screen = screen.edges[dim][side];
                 if (!screen) return;
 
                 // Found a neighbour
-                this.edges[pathDim][pathSide] = screen;
-                screen.edges[pathDim][1 - pathSide] = this;
+                newEdges[pathDim][pathSide] = screen;
 
                 screen = screen.edges[dim][side];
                 if (!screen) return;
@@ -344,8 +342,26 @@
                 if (!screen) return;
 
                 // Found a neighbour (if found by one path, should be found by all paths)
-                this.edges[dim][side] = screen;
-                screen.edges[dim][1 - side] = this;
+                newEdges[dim][side] = screen;
+            });
+        });
+
+        // Remove old connections
+        this.edges.forEach((edgeDim, dim) => {
+            edgeDim.forEach((screen, side) => {
+                if (screen) {
+                    screen.edges[dim][1 - side] = null;
+                }
+            });
+        });
+
+        // Create new connections
+        this.edges = newEdges;
+        this.edges.forEach((edgeDim, dim) => {
+            edgeDim.forEach((screen, side) => {
+                if (screen) {
+                    screen.edges[dim][1 - side] = this;
+                }
             });
         });
 
@@ -359,19 +375,6 @@
     Screen.prototype.connectClosest = function(screens) {
         var closest = this.closest(screens);
         if (closest) this.connect(closest.screen);
-    };
-
-    Screen.prototype.dragStart = function(e) {
-        // Disconnect from cluster
-        this.edges.forEach((edgeDim, dim) => {
-            edgeDim.forEach((screen, side) => {
-                if (screen) {
-                    screen.edges[dim][1 - side] = null;
-                }
-            });
-        });
-
-        this.edges = [[null, null], [null, null]];
     };
 
     Screen.prototype.dragMove = function(e) {
