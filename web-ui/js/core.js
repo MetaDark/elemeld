@@ -296,5 +296,19 @@
         console.log(this);
     };
 
-    new Canvas(document.querySelector('.canvas'));
+    var ws = new WebSocket("ws://127.0.0.1:3012");
+    ws.onopen = function(e) {
+        new Canvas(document.querySelector('.canvas'));
+    };
+
+    ws.onmessage = function(e) {
+        var obj = JSON.parse(e.data);
+        var type = Object.keys(obj)[0];
+        var event = obj[type];
+        switch(type) {
+        case "Screens":
+            console.log(event);
+            break;
+        }
+    };
 })(window, document, element.html)

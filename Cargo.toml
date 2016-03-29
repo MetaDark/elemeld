@@ -5,6 +5,7 @@ authors = ["MetaDark <kurt.bruneau@gmail.com>"]
 
 [dependencies]
 mio = "*"
+ws = "*"
 serde = "*"
 rustc-serialize = "*"
 serde_json = "*"

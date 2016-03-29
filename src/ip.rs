@@ -31,8 +31,8 @@ impl<'a> IpInterface<'a> {
 }
 
 impl<'a> NetInterface for IpInterface<'a> {
-    fn send_to(&self, event: NetEvent, addr: &SocketAddr) -> io::Result<Option<()>> {
-        let packet = bincode_serde::serialize(&event, SizeLimit::Bounded(1024)).unwrap();
+    fn send_to(&self, event: &NetEvent, addr: &SocketAddr) -> io::Result<Option<()>> {
+        let packet = bincode_serde::serialize(event, SizeLimit::Bounded(1024)).unwrap();
         debug!("=> {} <= ({} bytes) {:#?}", addr, packet.len(), event);
         match self.socket.send_to(&packet, addr) {
             Ok(Some(_)) => Ok(Some(())),
@@ -44,7 +44,7 @@ impl<'a> NetInterface for IpInterface<'a> {
         }
     }
 
-    fn send_to_all(&self, event: NetEvent) -> io::Result<Option<()>> {
+    fn send_to_all(&self, event: &NetEvent) -> io::Result<Option<()>> {
         let addr = match self.config.multicast_addr {
             IpAddr::V4(addr) => SocketAddr::V4((SocketAddrV4::new(addr, self.config.port))),
             IpAddr::V6(addr) => SocketAddr::V6((SocketAddrV6::new(addr, self.config.port, 0, 0))),

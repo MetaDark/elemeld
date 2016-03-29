@@ -309,6 +309,15 @@ impl Cluster {
         
         *self = other;
     }
+
+    pub fn get_screens(&self) -> &[Screen] {
+        &self.screens
+    }
+
+    pub fn set_screens(&mut self, screens: Vec<Screen>) {
+        self.screens = screens;
+        self.reset_local_screen();
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]

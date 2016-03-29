@@ -6,6 +6,7 @@ extern crate libc;
 extern crate nix;
 
 extern crate mio;
+extern crate ws;
 extern crate serde;
 extern crate rustc_serialize;
 extern crate serde_json;
@@ -18,6 +19,7 @@ extern crate env_logger;
 extern crate docopt;
 
 mod elemeld;
+mod config_server;
 mod cluster;
 mod io;
 mod x11;
@@ -25,7 +27,7 @@ mod ip;
 mod util;
 
 use elemeld::{Elemeld, Config};
-use mio::{IpAddr, EventLoop};
+use mio::IpAddr;
 
 docopt!(Args derive Debug, "
 Usage:
@@ -56,9 +58,6 @@ fn main() {
         port: args.flag_p,
     };
 
-    let mut event_loop = EventLoop::new().unwrap();
-    let mut elemeld = Elemeld::new(&mut event_loop, &config).unwrap();
-
-    info!("Starting event loop");
-    event_loop.run(&mut elemeld).unwrap();
+    let mut elemeld = Elemeld::new(&config).unwrap();
+    elemeld.run().unwrap();
 }
