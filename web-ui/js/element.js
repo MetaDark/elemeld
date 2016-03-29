@@ -43,7 +43,7 @@ var element = (function(window, document) {
         params.className.forEach(function(className) {
           if (className instanceof Array) {
             classList.concat(className);
-          } else {
+          } else if (className) {
             classList.push(className);
           }
         });

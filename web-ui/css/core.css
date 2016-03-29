@@ -9,13 +9,15 @@ body {
 }
 
 .header {
+    font-size: 2.5em;
     flex: 0;
     text-align: center;
     text-transform: capitalize;
-    background-color: #2196f3;
+    background-color: #2196F3;
     color: #ffffff;
     margin: 0;
     padding: 15px;
+    box-shadow: 0px 5px 10px rgba(0,0,0,0.25);
 }
 
 .canvas {
@@ -42,14 +44,21 @@ body {
 }
 
 .screen {
+    font-size: 1.25em;
     display: flex;
     justify-content: center;
     align-content: center;
     flex-direction: column;
     position: absolute;
     box-sizing: border-box;
-    background-color: #8BC34A;
+    background-color: #727272;
+    color: #ffffff;
     transition: transform 0.2s ease-out, opacity 0.2s ease-out, box-shadow 0.2s ease-out;
+}
+
+.screen.local {
+    background-color: #2196F3;
+    color: #ffffff;
 }
 
 .screen.dragging {

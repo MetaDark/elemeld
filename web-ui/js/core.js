@@ -15,7 +15,7 @@
         }, 0);
     }
 
-    function Canvas(elem) {
+    function Canvas(elem, socket) {
         this.elem = elem;
         this.view = E('div', {
             className: 'view',
@@ -24,14 +24,12 @@
 
         this.pos = [0, 0];
         this.screens = [];
-        this.names = ['Main Laptop', 'Desktop', 'Secondary Laptop', 'Gallifrey', 'Kronos', 'Atlantis'];
-        this.nameIndex = 0;
         this.focuses = {};
 
         function dragStart(e) {
-            // Add new screens when ctrl is pressed
+            // Add dummy screens when ctrl is pressed
             if (e.ctrlKey) {
-                this.addScreen(this.localizePos(e.pos));
+                this.addDummyScreen(this.localizePos(e.pos));
                 return;
             }
 
@@ -108,16 +106,34 @@
                 target.dragEnd(e);
             }
 
+            // Update the cluster
+            socket.send(JSON.stringify({
+                Screens: this.cluster.screens.map((screen, id) => {
+                    if (this.screens[id]) {
+                        // Update the edges
+                        var edges = this.screens[id].edges;
+                        screen.edges = {
+                            left: edges[0][0] ? edges[0][0].id : null,
+                            right: edges[0][1] ? edges[0][1].id : null,
+                            top: edges[1][0] ? edges[1][0].id : null,
+                            bottom: edges[1][1] ? edges[1][1].id : null,
+                        };
+                    }
+
+                    return screen;
+                }),
+            }));
+
             delete this.focuses[e.id];
         };
 
         // Setup mouse events
         function mouseEvent(cb, e) {
+            if (e.button !== 0) return;
             cb.call(this, {
                 id: null,
                 target: e.target,
                 pos: [e.clientX, e.clientY],
-                button: e.button,
                 ctrlKey: e.ctrlKey,
                 altKey: e.altKey,
                 shiftKey: e.shiftKey,
@@ -136,7 +152,6 @@
                     id: touch.identifier,
                     target: e.target,
                     pos: [touch.clientX, touch.clientY],
-                    button: null,
                     ctrlKey: e.ctrlKey,
                     altKey: e.altKey,
                     shiftKey: e.shiftKey,
@@ -149,11 +164,31 @@
         elem.addEventListener('touchstart', touchEvent.bind(this, dragStart), false);
         elem.addEventListener('touchmove', touchEvent.bind(this, dragMove), false);
         elem.addEventListener('touchend', touchEvent.bind(this, dragEnd), false);
+
+        // Network events
+        socket.onmessage = (e) => {
+            var obj = JSON.parse(e.data);
+            var type = Object.keys(obj)[0];
+            var event = obj[type];
+            switch(type) {
+            case "Cluster":
+                this.replaceCluster(event);
+                break;
+            }
+        };
     }
 
     Canvas.prototype.setPos = function(pos) {
         this.pos = pos;
         this.view.style.transform = 'translate(' + this.pos[0] + 'px,' + this.pos[1] + 'px)';
+    };
+
+    Canvas.prototype.getCenter = function() {
+        var rect = this.elem.getBoundingClientRect();
+        return [
+            rect.width / 2,
+            rect.height / 2,
+        ];
     };
 
     Canvas.prototype.localizePos = function(pos) {
@@ -162,6 +197,59 @@
             pos[0] - rect.left - this.pos[0],
             pos[1] - rect.top - this.pos[1],
         ];
+    };
+
+    Canvas.prototype.replaceCluster = function(cluster) {
+        this.cluster = cluster;
+        this.screens.forEach((screen) => {
+            screen.elem.parentElement.removeChild(screen.elem)
+        });
+        this.screens = [];
+        this.addScreens(cluster, cluster.local_screen, this.getCenter());
+    };
+
+    Canvas.prototype.addScreens = function(cluster, id, pos) {
+        var obj = this.screens[id];
+        if (obj) return obj;
+
+        var obj = cluster.screens[id];
+        if (!obj) return null;
+
+        var screen = new Screen({
+            id: id,
+            name: obj.name,
+            pos: pos,
+            size: [200, 125],
+            local: cluster.local_screen === id,
+        });
+
+        this.screens[id] = screen;
+        this.view.appendChild(screen.elem);
+
+        // Resolve edges
+        screen.edges = [[
+            this.addScreens(cluster, obj.edges.left, vectorSub(pos, [screen.size[0] + gridPad, 0])),
+            this.addScreens(cluster, obj.edges.right, vectorAdd(pos, [screen.size[0] + gridPad, 0])),
+        ], [
+            this.addScreens(cluster, obj.edges.top, vectorSub(pos, [0, screen.size[1] + gridPad])),
+            this.addScreens(cluster, obj.edges.bottom, vectorAdd(pos, [0, screen.size[1] + gridPad])),
+        ]];
+
+        return screen;
+    };
+
+    Canvas.prototype.addDummyScreen = function(pos) {
+        var screen = new Screen({
+            id: this.screens.length,
+            name: "Dummy Screen",
+            pos: pos,
+            size: [200, 125],
+        });
+
+        screen.connectClosest(this.getScreens());
+        this.screens.push(screen);
+        this.view.appendChild(screen.elem);
+        return screen;
     };
 
     Canvas.prototype.getScreens = function() {
@@ -176,32 +264,18 @@
         });
     };
 
-    Canvas.prototype.addScreen = function(pos) {
-        var id = this.screens.length;
-        var screen = new Screen({
-            id: id,
-            name: this.names[this.nameIndex],
-            pos: pos,
-            size: [160, 100],
-        });
-
-        this.nameIndex = (this.nameIndex + 1) % this.names.length;
-        screen.connectClosest(this.getScreens());
-        this.screens.push(screen);
-        this.view.appendChild(screen.elem);
-        return screen;
-    };
-
     Canvas.prototype.dragMove = function(e) {
         this.setPos(vectorAdd(this.pos, e.delta));
     }
 
     function Screen(params) {
+        this.id = params.id;
+
         this.elem = E('div', {
             dataset: { id: params.id },
-            className: 'screen draggable',
+            className: ['screen', params.local ? 'local' : '', 'draggable'],
             children: [E('h3', {
-                className: 'screen-name',
+                className: ['screen-name'],
                 textContent: params.name,
             })]
         });
@@ -251,24 +325,28 @@
         other.edges[dim][side] = this;
         this.edges[dim][1 - side] = other;
 
-        // Walk around the graph to find direct neighbours (only works in 2D)
-        other.edges[1 - dim].forEach((screen, pathSide) => {
-            if (!screen) return;
-            screen = screen.edges[dim][side];
-            if (!screen) return;
+        // Walk around graph through adjacent dimensions to find neighbours
+        other.edges.filter((edgeDim, pathDim) => {
+            return pathDim != dim;
+        }).forEach((edgeDim, pathDim) => {
+            edgeDim.forEach((screen, pathSide) => {
+                if (!screen) return;
+                screen = screen.edges[dim][side];
+                if (!screen) return;
 
-            // Found a neighbour
-            this.edges[1 - dim][pathSide] = screen;
-            screen.edges[1 - dim][1 - pathSide] = this;
+                // Found a neighbour
+                this.edges[pathDim][pathSide] = screen;
+                screen.edges[pathDim][1 - pathSide] = this;
 
-            screen = screen.edges[dim][side];
-            if (!screen) return;
-            screen = screen.edges[1 - dim][1 - pathSide];
-            if (!screen) return;
+                screen = screen.edges[dim][side];
+                if (!screen) return;
+                screen = screen.edges[pathDim][1 - pathSide];
+                if (!screen) return;
 
-            // Found a neighbour (if found by one path, should be found by all paths)
-            this.edges[dim][side] = screen;
-            screen.edges[dim][1 - side] = this;
+                // Found a neighbour (if found by one path, should be found by all paths)
+                this.edges[dim][side] = screen;
+                screen.edges[dim][1 - side] = this;
+            });
         });
 
         // Move this screen adjacent to the other screen
@@ -284,6 +362,15 @@
     };
 
     Screen.prototype.dragStart = function(e) {
+        // Disconnect from cluster
+        this.edges.forEach((edgeDim, dim) => {
+            edgeDim.forEach((screen, side) => {
+                if (screen) {
+                    screen.edges[dim][1 - side] = null;
+                }
+            });
+        });
+
         this.edges = [[null, null], [null, null]];
     };
 
@@ -293,22 +380,14 @@
 
     Screen.prototype.dragEnd = function(e) {
         this.connectClosest(e.source.getScreens());
-        console.log(this);
     };
 
-    var ws = new WebSocket("ws://127.0.0.1:3012");
-    ws.onopen = function(e) {
-        new Canvas(document.querySelector('.canvas'));
+    var socket = new WebSocket("ws://127.0.0.1:3012");
+    socket.onopen = function(e) {
+        new Canvas(document.querySelector('.canvas'), socket);
     };
 
-    ws.onmessage = function(e) {
-        var obj = JSON.parse(e.data);
-        var type = Object.keys(obj)[0];
-        var event = obj[type];
-        switch(type) {
-        case "Screens":
-            console.log(event);
-            break;
-        }
+    socket.onerror = function(e) {
+        alert("Failed to connect to server");
     };
 })(window, document, element.html)
