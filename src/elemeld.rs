@@ -115,19 +115,19 @@ impl<'a> Elemeld<'a> {
 
     #[allow(unused_variables)]
     pub fn net_event(&mut self, event: NetEvent, addr: &SocketAddr) {
-        self.broadcast_net_event(&event);
         match event {
             // Initialization events
             NetEvent::Connect(cluster) => {
                 self.cluster.merge(cluster);
-                let event = NetEvent::Cluster(self.cluster.clone());
-                match self.net.send_to_all(&event) {
+                self.broadcast_net_event(&NetEvent::Cluster(self.cluster.clone()));
+                match self.net.send_to_all(&NetEvent::Cluster(self.cluster.clone())) {
                     Ok(_) => self.state = State::Connected,
                     Err(err) => error!("Failed to connect: {}", err),
                 };
             },
             NetEvent::Cluster(cluster) => {
                 self.cluster.replace(&self.host, cluster);
+                self.broadcast_net_event(&NetEvent::Cluster(self.cluster.clone()));
                 self.state = State::Connected;
             },
             NetEvent::RequestCluster => {
@@ -198,9 +198,7 @@ impl<'a> Handler for Elemeld<'a> {
                 if events.is_writable() {
                     match self.state {
                         State::Connecting => {
-                            let event = NetEvent::Connect(self.cluster.clone());
-                            self.broadcast_net_event(&event);
-                            match self.net.send_to_all(&event) {
+                            match self.net.send_to_all(&NetEvent::Connect(self.cluster.clone())) {
                                 Err(err) => error!("Failed to connect: {}", err),
                                 _ => (),
                             };
