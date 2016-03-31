@@ -10,13 +10,10 @@ use std::path::PathBuf;
 /// Obtain the host's name
 pub fn get_host_name() -> Result<String, nix::Error> {
     let mut buf = [0; 255];
-    match gethostname(&mut buf) {
-        Ok(_) => {
-            let len = unsafe { strlen(mem::transmute(&buf as *const u8)) };
-            Ok(String::from_utf8_lossy(&buf[..len]).into_owned())
-        },
-        Err(err) => Err(err),
-    }
+    gethostname(&mut buf).map(|_| {
+        let len = unsafe { strlen(mem::transmute(&buf as *const u8)) };
+        String::from_utf8_lossy(&buf[..len]).into_owned()
+    })
 }
 
 /// Obtain all of the host's IP addresses
@@ -55,10 +52,9 @@ pub fn get_host_ips() -> Result<Vec<net::IpAddr>, nix::Error> {
 
 // Obtain the directory for storing application data
 pub fn user_app_dir(name: &str) -> Option<PathBuf> {
-    match env::home_dir() {
-        Some(base) => Some(base.join(".config").join(name)),
-        None => None,
-    }
+    env::home_dir().map(|base| {
+        base.join(".config").join(name)
+    })
 
     // I think this is what is needed for other
     // OSes but I can't test them right now:

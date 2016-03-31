@@ -28,13 +28,9 @@ impl Cluster {
         // This is probably weird place to load a file from
         let app_dir = util::user_app_dir("elemeld").unwrap();
         let screens = match File::open(app_dir.join("screens.json")) {
-            Ok(file) => match serde_json::from_reader(file) {
-                Ok(screens) => Some(screens),
-                Err(err) => {
-                    warn!("Failed to parse screens.json: {}", err);
-                    None
-                },
-            },
+            Ok(file) => serde_json::from_reader(file).map_err(|err| {
+                warn!("Failed to parse screens.json: {}", err);
+            }).ok(),
             Err(err) => {
                 warn!("Failed to open screens.json {}", err);
                 None

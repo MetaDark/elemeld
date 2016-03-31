@@ -55,15 +55,13 @@ impl<'a> NetInterface for IpInterface<'a> {
 
     fn recv_from(&self) -> io::Result<Option<(NetEvent, SocketAddr)>> {
         let mut buf = [0; 1024];
-        match self.socket.recv_from(&mut buf) {
-            Ok(Some((len, addr))) => {
+        self.socket.recv_from(&mut buf).map(|result| {
+            result.map(|(len, addr)| {
                 let event = bincode_serde::deserialize::<NetEvent>(&buf[..len]).unwrap();
                 debug!("<= {} => ({} bytes) {:#?}", addr, len, event);
-                Ok(Some((event, addr)))
-            },
-            Ok(None) => Ok(None),
-            Err(err) => Err(err),
-        }
+                (event, addr)
+            })
+        })
     }
 }
 

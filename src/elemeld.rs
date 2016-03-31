@@ -29,7 +29,7 @@ pub struct Config {
     pub port: u16
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 enum State {
     Connecting,
     Waiting,
@@ -85,31 +85,25 @@ impl<'a> Elemeld<'a> {
     }
 
     pub fn host_event(&mut self, event: HostEvent) {
-        match self.state {
-            State::Connected => match self.cluster.process_host_event(&self.host, event) {
-                Some(event) => match event {
-                    // Global events
-                    NetEvent::Focus(_) => {
-                        match self.net.send_to_all(&event) {
-                            Err(e) => {
-                                error!("Failed to send event to cluster: {}", e);
-                                self.state = State::Waiting;
-                            }
-                            _ => (),
-                        };
-                    },
-                    // Focused events
-                    event => {
-                        let addr = self.cluster.focused_screen().default_route();
-                        match self.net.send_to(&event, addr) {
-                            Err(e) => error!("Failed to send event to {}: {}", addr, e),
-                            _ => (),
-                        };
-                    },
+        if self.state != State::Connected { return }
+
+        if let Some(event) = self.cluster.process_host_event(&self.host, event) {
+            match event {
+                // Global events
+                NetEvent::Focus(_) => {
+                    if let Err(err) = self.net.send_to_all(&event) {
+                        error!("Failed to send event to cluster: {}", err);
+                        self.state = State::Waiting;
+                    }
                 },
-                None => (),
-            },
-            _ => (),
+                // Focused events
+                event => {
+                    let addr = self.cluster.focused_screen().default_route();
+                    if let Err(err) = self.net.send_to(&event, addr) {
+                        error!("Failed to send event to {}: {}", addr, err);
+                    }
+                },
+            }
         }
     }
 
@@ -131,10 +125,9 @@ impl<'a> Elemeld<'a> {
                 self.state = State::Connected;
             },
             NetEvent::RequestCluster => {
-                match self.net.send_to(&NetEvent::Cluster(self.cluster.clone()), addr) {
-                    Err(err) => error!("Failed to passively connect: {}", err),
-                    _ => (),
-                };
+                if let Err(err) = self.net.send_to(&NetEvent::Cluster(self.cluster.clone()), addr) {
+                    error!("Failed to passively connect: {}", err);
+                }
             },
             NetEvent::Screens(screens) => {
                 self.cluster.set_screens(screens);
@@ -144,9 +137,8 @@ impl<'a> Elemeld<'a> {
                 self.cluster.refocus(&self.host, focus);
             },
             // Focued events
-            event => match self.cluster.process_net_event(event) {
-                Some(event) => { self.host.send_event(event); },
-                None => (),
+            event => if let Some(event) = self.cluster.process_net_event(event) {
+                self.host.send_event(event);
             },
         }
     }
@@ -159,7 +151,7 @@ impl<'a> Elemeld<'a> {
     fn broadcast_net_event(&self, event: &NetEvent) {
         match self.clients {
             Some(ref clients) => self.send_net_event(event, clients),
-            _ => unreachable!("Cannot broadcast without clients"),
+            None => unreachable!("Cannot broadcast without clients"),
         }
     }
 }
@@ -178,11 +170,8 @@ impl<'a> Handler for Elemeld<'a> {
                     // A single mio event trigger may correspond to
                     // many host events, so process all host events
                     // Be careful in host.recv_event so this doesn't infinite loop
-                    loop {
-                        match self.host.recv_event() {
-                            Some(event) => self.host_event(event),
-                            None => break,
-                        }
+                    while let Some(event) = self.host.recv_event() {
+                        self.host_event(event);
                     }
                 }
             },
@@ -198,10 +187,9 @@ impl<'a> Handler for Elemeld<'a> {
                 if events.is_writable() {
                     match self.state {
                         State::Connecting => {
-                            match self.net.send_to_all(&NetEvent::Connect(self.cluster.clone())) {
-                                Err(err) => error!("Failed to connect: {}", err),
-                                _ => (),
-                            };
+                            if let Err(err) = self.net.send_to_all(&NetEvent::Connect(self.cluster.clone())) {
+                                error!("Failed to connect: {}", err);
+                            }
 
                             self.state = State::Waiting;
                             event_loop.reregister(&self.net,
