@@ -37,8 +37,8 @@ Usage:
 
 Options:
   -b <bind_addr>       Bind address [default: 0.0.0.0].
-  -m <multicast_addr>  Multicast address [default: 239.255.80.80].
-  -p <port>            Port [default: 8080].
+  -m <multicast_addr>  Multicast address [default: 224.0.2.42].
+  -p <port>            Port [default: 24242].
   -h --help            Show this screen.
   -v --version         Show version.
 ", flag_p: u16);

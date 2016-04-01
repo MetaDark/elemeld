@@ -326,7 +326,7 @@ pub struct Screen {
 
 impl Screen {
     pub fn new(width: i32, height: i32) -> Self {
-        let port = 8080; // FIXME: Get from config
+        let port = 24242; // FIXME: Get from config
         Screen {
             name: util::get_host_name().unwrap(),
             addrs: util::get_host_ips().unwrap().into_iter()
