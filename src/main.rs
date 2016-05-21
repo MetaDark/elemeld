@@ -18,7 +18,7 @@ extern crate log;
 extern crate env_logger;
 extern crate docopt;
 
-mod elemeld;
+mod hub;
 mod config_server;
 mod cluster;
 mod io;
@@ -26,7 +26,7 @@ mod x11;
 mod ip;
 mod util;
 
-use elemeld::{Elemeld, Config};
+use hub::{Hub, Config};
 use mio::IpAddr;
 
 docopt!(Args derive Debug, "
@@ -58,6 +58,6 @@ fn main() {
         port: args.flag_p,
     };
 
-    let mut elemeld = Elemeld::new(&config).unwrap();
+    let mut elemeld = Hub::new(&config).unwrap();
     elemeld.run().unwrap();
 }

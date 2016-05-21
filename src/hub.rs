@@ -15,7 +15,7 @@ use std::thread;
 const HOST_EVENT: Token = Token(0);
 const NET_EVENT: Token = Token(1);
 
-pub struct Elemeld<'a> {
+pub struct Hub<'a> {
     cluster: Cluster,
     host: X11Interface,
     net: IpInterface<'a>,
@@ -36,7 +36,7 @@ enum State {
     Connected,
 }
 
-impl<'a> Elemeld<'a> {
+impl<'a> Hub<'a> {
     pub fn new(config: &'a Config) -> io::Result<Self> {
         let host = X11Interface::open();
         let net = try!(IpInterface::open(config));
@@ -45,7 +45,7 @@ impl<'a> Elemeld<'a> {
         let (x, y) = host.cursor_pos();
         let cluster = Cluster::new(width, height, x, y);
 
-        Ok(Elemeld {
+        Ok(Hub {
             cluster: cluster,
             host: host,
             net: net,
@@ -156,7 +156,7 @@ impl<'a> Elemeld<'a> {
     }
 }
 
-impl<'a> Handler for Elemeld<'a> {
+impl<'a> Handler for Hub<'a> {
     type Timeout = ();
     type Message = (NetEvent, WsSender);
 
