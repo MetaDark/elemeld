@@ -1,5 +1,4 @@
 use io::*;
-use elemeld::Config;
 
 use mio::*;
 use mio::udp::UdpSocket;
@@ -8,13 +7,19 @@ use bincode::{serde as bincode_serde, SizeLimit};
 use std::io;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 
-pub struct IpInterface<'a> {
-    config: &'a Config,
-    socket: udp::UdpSocket,
+pub struct Config {
+    pub server_addr: IpAddr,
+    pub multicast_addr: IpAddr,
+    pub port: u16
 }
 
-impl<'a> IpInterface<'a> {
-    pub fn open(config: &'a Config) -> io::Result<Self> {
+pub struct IpInterface {
+    socket: udp::UdpSocket,
+    config: Config,
+}
+
+impl IpInterface {
+    pub fn open(config: Config) -> io::Result<Self> {
         let socket = try!(UdpSocket::v4());
         try!(socket.set_multicast_loop(false));
         try!(socket.join_multicast(&config.multicast_addr));
@@ -30,7 +35,7 @@ impl<'a> IpInterface<'a> {
     }
 }
 
-impl<'a> NetInterface for IpInterface<'a> {
+impl NetInterface for IpInterface {
     fn send_to(&self, event: &NetEvent, addr: &SocketAddr) -> io::Result<Option<()>> {
         let packet = bincode_serde::serialize(event, SizeLimit::Bounded(1024)).unwrap();
         debug!("=> {} <= ({} bytes) {:#?}", addr, packet.len(), event);
@@ -69,7 +74,7 @@ impl<'a> NetInterface for IpInterface<'a> {
  * FIXME(Future):
  * Method delegation: https://github.com/rust-lang/rfcs/pull/1406
  */
-impl<'a> Evented for IpInterface<'a> {
+impl Evented for IpInterface {
     fn register(&self, selector: &mut Selector, token: Token, interest: EventSet, opts: PollOpt) -> io::Result<()> {
         self.socket.register(selector, token, interest, opts)
     }

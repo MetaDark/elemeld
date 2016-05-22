@@ -15,18 +15,12 @@ use std::thread;
 const HOST_EVENT: Token = Token(0);
 const NET_EVENT: Token = Token(1);
 
-pub struct Hub<'a> {
+pub struct Hub {
     cluster: Cluster,
     host: X11Interface,
-    net: IpInterface<'a>,
+    net: IpInterface,
     clients: Option<WsSender>,
     state: State,
-}
-
-pub struct Config {
-    pub server_addr: IpAddr,
-    pub multicast_addr: IpAddr,
-    pub port: u16
 }
 
 #[derive(PartialEq, Clone, Copy, Debug)]
@@ -36,11 +30,8 @@ enum State {
     Connected,
 }
 
-impl<'a> Hub<'a> {
-    pub fn new(config: &'a Config) -> io::Result<Self> {
-        let host = X11Interface::open();
-        let net = try!(IpInterface::open(config));
-
+impl Hub {
+    pub fn new(host: X11Interface, net: IpInterface) -> io::Result<Self> {
         let (width, height) = host.screen_size();
         let (x, y) = host.cursor_pos();
         let cluster = Cluster::new(width, height, x, y);
@@ -156,7 +147,7 @@ impl<'a> Hub<'a> {
     }
 }
 
-impl<'a> Handler for Hub<'a> {
+impl Handler for Hub {
     type Timeout = ();
     type Message = (NetEvent, WsSender);
 

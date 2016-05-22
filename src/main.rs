@@ -26,8 +26,11 @@ mod x11;
 mod ip;
 mod util;
 
-use hub::{Hub, Config};
+use hub::Hub;
 use mio::IpAddr;
+
+use ip::{IpInterface, Config};
+use x11::X11Interface;
 
 docopt!(Args derive Debug, "
 Usage:
@@ -58,6 +61,8 @@ fn main() {
         port: args.flag_p,
     };
 
-    let mut elemeld = Hub::new(&config).unwrap();
+    let host = X11Interface::open();
+    let net = IpInterface::open(config).unwrap();
+    let mut elemeld = Hub::new(host, net).unwrap();
     elemeld.run().unwrap();
 }
