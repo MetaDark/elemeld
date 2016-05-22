@@ -45,7 +45,7 @@ impl Cluster {
             },
             focus: Focus {
                 index: 0,
-                pos: Dimensions { x: x , y: y },
+                pos: Dimensions { x: x, y: y },
             },
             selections: vec![0, 0],
         }

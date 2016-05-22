@@ -55,14 +55,13 @@ fn main() {
         return;
     };
 
-    let config = Config {
+    let host = X11Interface::open();
+    let net = IpInterface::open(Config {
         server_addr: args.flag_b.parse::<IpAddr>().unwrap(),
         multicast_addr: args.flag_m.parse::<IpAddr>().unwrap(),
         port: args.flag_p,
-    };
+    }).unwrap();
 
-    let host = X11Interface::open();
-    let net = IpInterface::open(config).unwrap();
     let mut elemeld = Hub::new(host, net).unwrap();
     elemeld.run().unwrap();
 }

@@ -1,7 +1,5 @@
 use io::*;
 use cluster::Cluster;
-use x11::X11Interface;
-use ip::IpInterface;
 use config_server::ConfigServer;
 
 use mio::*;
@@ -15,10 +13,13 @@ use std::thread;
 const HOST_EVENT: Token = Token(0);
 const NET_EVENT: Token = Token(1);
 
-pub struct Hub {
+pub struct Hub<H, N> where
+    H: HostInterface + Evented,
+    N: NetInterface + Evented,
+{
     cluster: Cluster,
-    host: X11Interface,
-    net: IpInterface,
+    host: H,
+    net: N,
     clients: Option<WsSender>,
     state: State,
 }
@@ -30,8 +31,11 @@ enum State {
     Connected,
 }
 
-impl Hub {
-    pub fn new(host: X11Interface, net: IpInterface) -> io::Result<Self> {
+impl<H, N> Hub<H, N> where
+    H: HostInterface + Evented,
+    N: NetInterface + Evented,
+{
+    pub fn new(host: H, net: N) -> io::Result<Self> {
         let (width, height) = host.screen_size();
         let (x, y) = host.cursor_pos();
         let cluster = Cluster::new(width, height, x, y);
@@ -98,7 +102,6 @@ impl Hub {
         }
     }
 
-    #[allow(unused_variables)]
     pub fn net_event(&mut self, event: NetEvent, addr: &SocketAddr) {
         match event {
             // Initialization events
@@ -147,7 +150,10 @@ impl Hub {
     }
 }
 
-impl Handler for Hub {
+impl<H, N> Handler for Hub<H, N> where
+    H: HostInterface + Evented,
+    N: NetInterface + Evented,
+{
     type Timeout = ();
     type Message = (NetEvent, WsSender);
 
